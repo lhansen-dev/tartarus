@@ -4,22 +4,37 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASELINE_KIT="${TARTARUS_BASELINE_KIT:-$ROOT/kits/team-baseline}"
-KIT_SOURCES="${TARTARUS_KIT_SOURCES:-[\"docker.io/sbx/\",\"github.com/yourorg/\"]}"
+KIT_SOURCES="${TARTARUS_KIT_SOURCES:-[\"docker.io/sbx/\"]}"
 DENY_FILE="${TARTARUS_DENY_FILE:-$ROOT/policy/deny.txt}"
+CPUS="${TARTARUS_CPUS:-4}"
+MEMORY="${TARTARUS_MEMORY:-8g}"
+
+# Host settings tartarus pins. `audit` fails if any drifts.
+SETTINGS=(
+  ssh.agentForwardingEnabled=false  # 1Password's agent would hand over every key
+  clipboard.imagePaste=false        # the image runs a host clipboard bridge
+  claude.remoteControl=false        # remote-control is an inbound channel to the agent
+  env.rememberHostCommands=false    # every host command an env runs needs fresh approval
+  skills.defaultMode=off            # no host skills store linked into sandboxes
+)
 
 usage() {
   cat <<'EOF'
 Usage: tartarus <command> [args]
 
-  setup                         Harden sbx once per machine (SSH forwarding off, kit sources, network policy)
+  setup                         Harden sbx on this machine: pinned settings, deny-all network policy.
+                                Resets the global network policy; per-sandbox kit rules are kept.
+  audit                         Check this machine's sbx settings, policy and secrets match setup
   login <harness>               Store the harness credential in the host keychain (never enters the VM)
-  run <harness> [--name N] [path...] [-- agent args]
+  run <harness> [--name N] [--detach] [path...] [-- agent args]
                                 Start the harness in a clone-mode sandbox with the team kit.
-                                First path is the repo the agent changes (default: .); add :ro to extras.
-  verify <sandbox-name>         Check a running sandbox holds no host secrets, SSH keys or kube context
+                                First path is the repo the agent changes (default: .). Extra paths
+                                are mounted read-only; suffix one with :rw to make it writable.
+  verify <sandbox-name>         Run audit, then the in-sandbox battery: secrets, host surfaces, egress
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
+Env: TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
 EOF
 }
 
@@ -35,16 +50,41 @@ harness_kit() {
   esac
 }
 
+deny_hosts() { [[ -f "$DENY_FILE" ]] && grep -Ev '^\s*(#|$)' "$DENY_FILE" || true; }
+
 cmd_setup() {
-  sbx settings set ssh.agentForwardingEnabled false
+  local kv
+  for kv in "${SETTINGS[@]}"; do sbx settings set "${kv%%=*}" "${kv#*=}"; done
   sbx settings set kit.allowedSources "$KIT_SOURCES"
-  # init refuses to run twice; keep an existing policy rather than reset it.
-  sbx policy init balanced 2>/dev/null || echo "tartarus: network policy already initialized, keeping it"
-  if [[ -f "$DENY_FILE" ]]; then
-    grep -Ev '^\s*(#|$)' "$DENY_FILE" | while read -r host; do
-      sbx policy deny network "$host"
-    done
-  fi
+  # Rebuild the global policy from scratch so stale allows can't survive a re-run.
+  sbx policy reset --force
+  sbx policy init deny-all
+  deny_hosts | while read -r host; do sbx policy deny network "$host"; done
+}
+
+cmd_audit() {
+  local fail=0 kv got
+  for kv in "${SETTINGS[@]}"; do
+    got="$(sbx settings get "${kv%%=*}" 2>/dev/null || true)"
+    [[ "$got" == "${kv#*=}" ]] || { echo "  FAIL  ${kv%%=*} is '$got', want '${kv#*=}'"; fail=1; }
+  done
+  # Global network allows widen every sandbox past its kit; deny-all has none.
+  local allows
+  allows="$(sbx policy ls --json | python3 -c '
+import json, sys
+rules = json.load(sys.stdin)["rules"]
+print("\n".join(", ".join(r["resources"]) for r in rules
+  if r["scope"] == "global" and r["resource_type"] == "network" and r["decision"] == "allow"))')"
+  [[ -z "$allows" ]] || { echo "  FAIL  global network allows: $allows"; fail=1; }
+  local host
+  while read -r host; do
+    [[ -z "$host" ]] && continue
+    sbx policy ls --json | grep -qF "\"$host\"" || { echo "  FAIL  deny rule missing: $host"; fail=1; }
+  done < <(deny_hosts)
+  # A github secret would let the proxy push to github.com for the agent.
+  if sbx secret ls --quiet | grep -qx github; then echo "  FAIL  'github' secret stored"; fail=1; fi
+  ((fail)) && { echo "audit: FAIL (run: tartarus setup)"; return 1; }
+  echo "audit: OK (settings pinned, global policy deny-all, no github secret)"
 }
 
 cmd_login() {
@@ -63,37 +103,54 @@ cmd_login() {
 cmd_run() {
   local harness="${1:-}"; [[ -n "$harness" ]] || die "run needs a harness"; shift
   local kit; kit="$(harness_kit "$harness")"
-  local args=(run --clone --kit "$BASELINE_KIT")
+  local args=(run --clone --skills off --cpus "$CPUS" --memory "$MEMORY" --kit "$BASELINE_KIT")
   [[ -n "$kit" ]] && args+=(--kit "$kit")
   local paths=() rest=()
   while (($#)); do
     case "$1" in
       --name) [[ $# -ge 2 ]] || die "--name needs a value"; args+=(--name "$2"); shift 2 ;;
+      --detach|-d) args+=(--detach); shift ;;
       --) shift; rest=("$@"); break ;;
       *) paths+=("$1"); shift ;;
     esac
   done
   ((${#paths[@]})) || paths=(.)
+  local i primary extra
+  primary="$(realpath -m "${paths[0]}")"
+  # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.
+  for ((i = 1; i < ${#paths[@]}; i++)); do
+    extra="$(realpath -m "${paths[i]%:r[ow]}")"
+    # An extra containing the repo would mount it directly, bypassing clone mode.
+    [[ "$primary/" == "$extra/"* || "$extra/" == "$primary/"* ]] \
+      && die "extra path ${paths[i]} overlaps the repo $primary; mount siblings only"
+    case "${paths[i]}" in
+      *:rw) paths[i]="${paths[i]%:rw}" ;;
+      *:ro) ;;
+      *) paths[i]+=":ro" ;;
+    esac
+  done
   args+=("$harness" "${paths[@]}")
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
   exec sbx "${args[@]}"
 }
 
+host_ips() {
+  if command -v ip >/dev/null; then
+    ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1
+  else
+    ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2}'
+  fi
+}
+
 cmd_verify() {
   local name="${1:-}"; [[ -n "$name" ]] || die "verify needs a sandbox name"
-  # shortcut: assumes `sbx exec <name> <cmd...>`; confirm against `sbx exec --help` on first use.
-  # shellcheck disable=SC2016 # expands inside the sandbox, not here
-  sbx exec "$name" sh -c '
-    fail=0
-    # Proxy-managed credentials show up as sentinel values, which are safe.
-    if env | grep -E "^(VAULT_|AWS_|OP_|GH_TOKEN=|GITHUB_TOKEN=|KUBECONFIG=)" | grep -vE "proxymanaged|proxy-managed"; then
-      echo "FAIL: host secrets in env"; fail=1; fi
-    if ssh-add -l >/dev/null 2>&1; then echo "FAIL: SSH agent reachable"; fail=1; fi
-    if command -v kubectl >/dev/null && kubectl config current-context 2>/dev/null; then
-      echo "FAIL: kube context set"; fail=1; fi
-    [ "$fail" = 0 ] && echo "OK: no host secrets, SSH agent or kube context"
-    exit "$fail"'
-  echo "Review egress with: sbx policy log"
+  local fail=0 ips
+  cmd_audit || fail=1
+  mapfile -t ips < <(host_ips)
+  sbx cp "$ROOT/libexec/verify-inside.sh" "$name:/tmp/tartarus-verify.sh" >/dev/null
+  sbx exec "$name" sh /tmp/tartarus-verify.sh "${ips[@]}" 127.0.0.1 || fail=1
+  echo "Review egress with: sbx policy log $name"
+  return "$fail"
 }
 
 cmd_safe() {
@@ -111,6 +168,7 @@ cmd_safe() {
 
 case "${1:-}" in
   setup) shift; cmd_setup "$@" ;;
+  audit) shift; cmd_audit "$@" ;;
   login) shift; cmd_login "$@" ;;
   run) shift; cmd_run "$@" ;;
   verify) shift; cmd_verify "$@" ;;

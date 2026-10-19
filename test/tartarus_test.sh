@@ -16,13 +16,24 @@ check() { # check "<tartarus args>" "<expected last sbx line>"
   if [[ "$got" != "$2" ]]; then echo "FAIL: tartarus $1"; echo "  want: $2"; echo "  got:  $got"; fails=1; fi
 }
 
-check "run claude" "sbx run --clone --kit KIT claude ."
-check "run codex --name x ~/a ~/b:ro -- -m o3" "sbx run --clone --kit KIT --name x codex $HOME/a $HOME/b:ro -- -m o3"
-check "run copilot" "sbx run --clone --kit KIT --kit docker.io/sbx/copilot-kit:latest copilot ."
+R="run --clone --skills off --cpus 4 --memory 8g --kit KIT"
+check "run claude" "sbx $R claude ."
+check "run codex --name x --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
+  "sbx $R --name x --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
+check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit:latest copilot ."
 check "run gemini" ""
+check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
+check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
+check "run claude ~/a ~/ab" "sbx $R claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
 check "setup" "sbx policy deny network *.prod.yourco.com"
+
+: > "$TMP/log"; "$ROOT/bin/tartarus" setup >/dev/null
+for want in "sbx settings set ssh.agentForwardingEnabled false" "sbx settings set clipboard.imagePaste false" \
+  "sbx settings set skills.defaultMode off" "sbx policy reset --force" "sbx policy init deny-all"; do
+  grep -qxF "$want" "$TMP/log" || { echo "FAIL: setup missing: $want"; fails=1; }
+done
 
 ((fails)) && exit 1
 echo "all tests passed"
