@@ -64,8 +64,8 @@ Usage: tartarus <command> [args]
                                 (no name: every sandbox tartarus made)
   review <sandbox-name> <branch>
                                 Fetch the agent's branch to the host without checking it out, and flag
-                                changed files that run code on the host (hooks, CI, IDE tasks, builds).
-                                Exits 2 when any are found.
+                                changed files that run code on the host (hooks, CI, IDE tasks, builds)
+                                and credential-shaped strings in what you'd push. Exits 2 when any are found.
   sign-kits                     Sign kits/*/ and policy/*.txt with the team key (made on first use, kept
                                 outside the repo); commit kits/signing.pub and the signature files
   ls                            List sandboxes, and which predate the current lockdown (exits 1 if any do)

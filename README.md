@@ -29,7 +29,8 @@ TARTARUS_REGISTRIES=1 tartarus run claude  # also allow npm and PyPI (read-only:
 tartarus verify feat1                    # audit plus in-sandbox lockdown checks (no name: all of tartarus's)
 
 tartarus review feat1 <branch>           # fetch the agent's branch without checking it out;
-                                         # exits 2 if it touched hooks, CI, IDE tasks or build files
+                                         # exits 2 if it touched hooks, CI, IDE tasks or build files,
+                                         # or added credential-shaped strings (your push would leak them)
 git branch my-feature <commit review printed>  # not the branch: it moves on the next fetch
 tartarus rm feat1                        # also dismisses its pending approval prompts
 tartarus dismiss                         # dismiss every pending prompt; never allow one
