@@ -248,7 +248,7 @@ for r in json.load(sys.stdin).get("rules") or []:
   # The agent's session writes to this terminal: with set-clipboard on, an OSC 52 escape from the
   # sandbox sets your clipboard, ready for your next paste into a shell.
   if command -v tmux >/dev/null && [[ "$(tmux show -gv set-clipboard 2>/dev/null)" == on ]]; then
-    echo "  info  tmux set-clipboard is on: sandboxed programs can set your clipboard (set -g set-clipboard external)"
+    echo "  info  tmux set-clipboard is on: sandboxed programs can set your clipboard (set -g set-clipboard off)"
   fi
   local old; old="$(cmd_ls 2>/dev/null | grep -cvE ' current$|^Remove ' || true)"
   ((old == 0)) || echo "  info  $old sandbox(es) predate the current lockdown or weren't made by tartarus (tartarus ls)"
