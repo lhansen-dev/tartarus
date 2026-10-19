@@ -77,12 +77,13 @@ check_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9.-]+$ && "$1" != default ]] || d
 json_eq() { python3 -c 'import json, sys; sys.exit(json.loads(sys.argv[1]) != json.loads(sys.argv[2]))' "$1" "$2" 2>/dev/null; }
 indent() { while IFS= read -r line; do echo "          $line"; done <<<"$1"; }
 
-# Per-harness wiring. Agent names and defaults are sbx's own: copilot --yolo,
-# claude --dangerously-skip-permissions, codex --dangerously-bypass-approvals-and-sandbox.
-harness_kit() {
+# What sbx runs for each harness: a built-in agent name, or a sandbox kit (which sbx takes in
+# the agent's place). Defaults are sbx's own: copilot --yolo, claude
+# --dangerously-skip-permissions, codex --dangerously-bypass-approvals-and-sandbox.
+harness_agent() {
   case "$1" in
     copilot) echo "$COPILOT_KIT" ;;
-    claude|codex) ;;
+    claude|codex) echo "$1" ;;
     *) die "unknown harness '$1' (copilot, claude, codex)" ;;
   esac
 }
@@ -255,11 +256,10 @@ move them out, or TARTARUS_ALLOW_SECRET_FILES=1 if they're harmless"
 
 cmd_run() {
   local harness="${1:-}"; [[ -n "$harness" ]] || die "run needs a harness"; shift
-  local kit; kit="$(harness_kit "$harness")"
+  local agent; agent="$(harness_agent "$harness")"
   local args=(run --clone --skills off --cpus "$CPUS" --memory "$MEMORY" --kit "$BASELINE_KIT")
   [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] || args+=(--kit "$ROOT/kits/no-root")
   [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && args+=(--kit "$ROOT/kits/registries")
-  [[ -n "$kit" ]] && args+=(--kit "$kit")
   # A drifted machine (an approved prompt's allow, a registered MCP server, an unsigned deny
   # list) would widen every new sandbox, so it doesn't get one.
   local report; report="$(cmd_audit)" || die "audit failed; fix it before running an agent:
@@ -320,10 +320,11 @@ $report"
   existing="$(sbx ls --quiet)" || die "can't list sandboxes (sbx ls)"
   if grep -qxF "$name" <<<"$existing"; then
     [[ "$(cat "$record" 2>/dev/null)" == "$fp" ]] || die "sandbox $name exists with another config, or wasn't made by tartarus, and sbx would keep its old settings; tartarus rm $name, or use another --name"
-    args=(run --name "$name" ${detach:+"$detach"} "$harness")
+    # No agent: the sandbox keeps its own (the fingerprint covers it), and a kit here would make a new one.
+    args=(run --name "$name" ${detach:+"$detach"})
   else
     mkdir -p "$CONFIG/sandboxes" && echo "$fp" > "$record"
-    args+=(--name "$name" ${detach:+"$detach"} "$harness" "${paths[@]}")
+    args+=(--name "$name" ${detach:+"$detach"} "$agent" "${paths[@]}")
   fi
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
   exec sbx "${args[@]}"

@@ -44,7 +44,7 @@ DXR="$DX"; DX+=" --deny-network registry.npmjs.org"
 check "run claude" "sbx $R $DC claude ."
 check "run codex --name xy --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
   "sbx $R $DX --name xy --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
-check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108 copilot ."
+check "run copilot" "sbx $R --deny-network github.com --deny-network api.github.com docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108 ."
 export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."
 check "run codex" "sbx $R --kit $ROOT/kits/registries $DXR codex ."; unset TARTARUS_REGISTRIES
 check "run gemini" ""
@@ -172,7 +172,7 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 # Re-attaching by --name needs the config the sandbox was made with; sbx would keep the old one.
 "$ROOT/bin/tartarus" run claude --name same "$TMP/a/app" >/dev/null 2>&1 || true
 echo same > "$TMP/state/sandboxes"
-check "run claude --name same $TMP/a/app -- -c" "sbx run --name same claude -- -c"  # re-attach: no creation flags
+check "run claude --name same $TMP/a/app -- -c" "sbx run --name same -- -c"  # re-attach: no creation flags
 check "run claude --name same $TMP/a/app $TMP/lib:rw" ""
 TARTARUS_ALLOW_ROOT=1 check "run claude --name same $TMP/a/app" ""
 echo other >> "$TMP/state/sandboxes"; check "run claude --name other $TMP/a/app" ""  # not made by tartarus
