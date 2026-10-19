@@ -462,7 +462,8 @@ RISKY=(
   # IDEs and editors, which run tasks, launch configs and language servers on open.
   '\.vscode/|\.idea/|\.fleet/|\.zed/|\.helix/|\.devcontainer|.*\.code-workspace$|.*\.sublime-project$|\.exrc|\.nvimrc|\.nvim\.lua|\.lazy\.lua|\.dir-locals\.el|\.ycm_extra_conf\.py'
   # Agent config and instructions: prompt injection aimed at the next agent you run on the host.
-  '\.claude/|\.codex/|\.cursor/|\.gemini/|\.continue/|\.windsurf/|\.kiro/|\.roo|\.amazonq/|\.junie/|\.opencode|opencode\.jsonc?$|\.factory/|\.agents/|\.augment|\.trae/|\.qwen/|\.crush|\.aider|\.goosehints|\.mcp\.json|CLAUDE(\.local)?\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.clinerules'
+  # sbxenv.yaml declares sandboxes, mounts and secrets whose commands run on the host (sbx env).
+  '\.claude/|\.codex/|sbxenv\.ya?ml|sbx\.ya?ml|\.cursor/|\.gemini/|\.continue/|\.windsurf/|\.kiro/|\.roo|\.amazonq/|\.junie/|\.opencode|opencode\.jsonc?$|\.factory/|\.agents/|\.augment|\.trae/|\.qwen/|\.crush|\.aider|\.goosehints|\.mcp\.json|CLAUDE(\.local)?\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.clinerules'
   # Environment managers and dotenv files, which set PATH, LD_PRELOAD or NODE_OPTIONS for later commands.
   '\.env|\.direnv/|\.?mise[./]|\.tool-versions|.*\.nix$|flake\.lock|devenv\.|devbox\.json|pixi\.toml|rust-toolchain|\.sdkmanrc|Brewfile|Procfile|Vagrantfile|Tiltfile'
   # Build and task files.
