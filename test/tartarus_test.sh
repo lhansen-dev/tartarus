@@ -163,6 +163,17 @@ sed -i 's/"added"/"provisioned"/' "$TMP/state/policy"; check "run claude" "sbx $
 echo 10.0.0.0/8 > "$TMP/state/no_proxy.sandbox"; check "run claude" ""; : > "$TMP/state/no_proxy.sandbox"
 # Without the registry write denies, audit fails (npm publish would be an upload channel).
 echo "{\"rules\": [$D]}" > "$TMP/state/policy"; check "run claude" ""; rm "$TMP/state/policy"
+# A tartarus sandbox that lost one of its harness denies fails audit; with all of them it passes.
+mkdir -p "$TMP/config/tartarus/sandboxes" && echo "1 2 0" > "$TMP/config/tartarus/sandboxes/cx"
+echo '[{"name": "cx", "agent": "codex", "workspaces": []}]' > "$TMP/state/ls.json"
+rules="$D, $W"; for h in github.com api.github.com codeload.github.com registry.npmjs.org releases.openai.com files.openai.com; do
+  rules+=", {\"scope\": \"sandbox:cx\", \"resource_type\": \"network\", \"decision\": \"deny\", \"resources\": [\"$h\"]}"; done
+echo "{\"rules\": [$rules]}" > "$TMP/state/policy"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a sandbox missing a deny"; fails=1; }
+[[ "$out" == *"cx lost its deny for openai.com"* ]] || { echo "FAIL: audit didn't name the lost deny: $out"; fails=1; }
+echo "{\"rules\": [$rules, {\"scope\": \"sandbox:cx\", \"resource_type\": \"network\", \"decision\": \"deny\", \"resources\": [\"openai.com\"]}]}" > "$TMP/state/policy"
+"$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit with all of a sandbox's denies"; fails=1; }
+rm "$TMP/state/policy" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/cx"
 # sbx failing to answer fails audit, rather than reading as "nothing wrong" (audit runs with set -e off).
 echo '{"rules": [{"scope": "sandbox:ab", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/approved"
 check "run claude" ""; rm "$TMP/state/approved"
@@ -229,7 +240,7 @@ echo other >> "$TMP/state/sandboxes"; check "run claude --name other $TMP/a/app"
 printf 'same\n' > "$TMP/state/sandboxes"
 out="$("$ROOT/bin/tartarus" ls)" || { echo "FAIL: ls of a current sandbox exited $?"; fails=1; }
 [[ "$out" == *"same"*"current"* ]] || { echo "FAIL: ls: $out"; fails=1; }
-sed -i 's/ [0-9]*$/ 1/' "$TMP/config/tartarus/sandboxes/same"; printf 'same\nother\n' > "$TMP/state/sandboxes"
+r="$TMP/config/tartarus/sandboxes/same"; awk '{$2 = 1; print}' "$r" > "$r.new" && mv "$r.new" "$r"; printf 'same\nother\n' > "$TMP/state/sandboxes"
 rc=0; out="$("$ROOT/bin/tartarus" ls)" || rc=$?
 [[ $rc == 1 && "$out" == *"same"*"older lockdown"* && "$out" == *"other"*"not made by tartarus"* ]] || { echo "FAIL: ls stale (exit $rc): $out"; fails=1; }
 "$ROOT/bin/tartarus" rm same >/dev/null 2>&1; [[ ! -e "$TMP/config/tartarus/sandboxes/same" ]] || { echo "FAIL: rm kept the record"; fails=1; }

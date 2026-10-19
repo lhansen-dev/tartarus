@@ -238,6 +238,27 @@ for r in json.load(sys.stdin).get("rules") or []:
       (check_policy "$PINNED_PUB" "$f") 2>/dev/null || { echo "  FAIL  $f signature missing or stale (tartarus sign-kits)"; fail=1; }
     done < <(policy_files)
   fi
+  # The harness denies are per-sandbox rules: one removed later (sbx policy rm) reopens a
+  # connector or GitHub for that sandbox. Check every sandbox tartarus made still has its own.
+  local boxes pairs="" box agent reg h
+  boxes="$(sbx ls --json | python3 -c 'import json, sys; [print(s["name"], s["agent"]) for s in json.load(sys.stdin)]' 2>/dev/null)" \
+    || { echo "  FAIL  can't list sandboxes (sbx ls --json)"; fail=1; }
+  while read -r box agent; do
+    [[ -n "$box" && -f "$CONFIG/sandboxes/$box" && -f "$ROOT/policy/deny-$agent.txt" ]] || continue
+    reg="$(cut -s -d' ' -f3 "$CONFIG/sandboxes/$box")"
+    for h in $(hosts_in "$ROOT/policy/deny-$agent.txt" 2>/dev/null); do
+      [[ "$reg" == 1 ]] && grep -qxF "$h" <(registry_hosts) && continue
+      pairs+="$box $h"$'\n'
+    done
+  done <<<"$boxes"
+  report="$(python3 -c '
+import json, sys
+denied = {(r["scope"], h) for r in json.load(sys.stdin)["rules"] if r["decision"] == "deny" and not r.get("methods") for h in r["resources"]}
+for line in sys.argv[1].splitlines():
+    box, host = line.split()
+    if ("sandbox:" + box, host) not in denied: print("  FAIL  sandbox %s lost its deny for %s (tartarus rm %s; the next run recreates it)" % (box, host, box))' "$pairs" <<<"$policy" 2>/dev/null)" \
+    || report="  FAIL  can't check the sandboxes' deny rules"
+  [[ -z "$report" ]] || { echo "$report"; fail=1; }
   # Every sandbox reaches the MCP gateway (a daemon alias that deny rules don't cover), so any
   # registered server is exposed to every agent; host stdio servers run commands on the host.
   local mcp; mcp="$(sbx mcp ls 2>&1 || true)"
@@ -368,7 +389,8 @@ $(sanitize <<<"$report")"
     # No agent: the sandbox keeps its own (the fingerprint covers it), and a kit here would make a new one.
     args=(run --name "$name" ${detach:+"$detach"})
   else
-    mkdir -p "$CONFIG/sandboxes" && echo "$fp $lockdown" > "$record"  # the second for tartarus ls
+    # The lockdown for tartarus ls; the registries flag for audit, which checks the harness denies.
+    mkdir -p "$CONFIG/sandboxes" && echo "$fp $lockdown ${TARTARUS_REGISTRIES:-0}" > "$record"
     args+=(--name "$name" ${detach:+"$detach"} "$agent" "${paths[@]}")
   fi
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
