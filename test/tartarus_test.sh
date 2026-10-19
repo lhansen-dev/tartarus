@@ -186,6 +186,13 @@ echo "{\"rules\": [$D, $W, $A]}" > "$TMP/state/policy"
 echo "{\"rules\": [$D, $W, $A, ${A/api.anthropic.com/pypi.org}]}" > "$TMP/state/policy"
 out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a sandbox that gained an allow"; fails=1; }
 [[ "$out" == *"ka gained allows"*"pypi.org"* ]] || { echo "FAIL: audit allow growth: $out"; fails=1; }
+# Recreated (sbx kit add with only startup commands): created_at moves, audit fails.
+echo "{\"rules\": [$D, $W, $A]}" > "$TMP/state/policy"
+echo '[{"name": "ka", "agent": "shell", "created_at": "T1"}]' > "$TMP/state/ls.json"; rm -f "$TMP/config/tartarus/sandboxes/ka.created" "$TMP/config/tartarus/sandboxes/ka.allows"
+"$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: first audit records created_at"; fails=1; }
+echo '[{"name": "ka", "agent": "shell", "created_at": "T2"}]' > "$TMP/state/ls.json"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a recreated sandbox"; fails=1; }
+[[ "$out" == *"ka was recreated"* ]] || { echo "FAIL: audit recreated: $out"; fails=1; }
 rm -f "$TMP/state/policy" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/ka"*
 # A port published beyond loopback is an inbound channel to the agent: audit fails.
 echo '[{"name": "pb", "agent": "claude"}]' > "$TMP/state/ls.json"

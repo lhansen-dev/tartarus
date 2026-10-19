@@ -242,7 +242,7 @@ for r in json.load(sys.stdin).get("rules") or []:
   # The harness denies are per-sandbox rules: one removed later (sbx policy rm) reopens a
   # connector or GitHub for that sandbox. Check every sandbox tartarus made still has its own.
   local boxes pairs="" box agent reg h
-  boxes="$(sbx ls --json | python3 -c 'import json, sys; [print(s["name"], s["agent"]) for s in json.load(sys.stdin)]' 2>/dev/null)" \
+  boxes="$(sbx ls --json | python3 -c 'import json, sys; [print(s["name"], s["agent"], s.get("created_at", "")) for s in json.load(sys.stdin)]' 2>/dev/null)" \
     || { echo "  FAIL  can't list sandboxes (sbx ls --json)"; fail=1; }
   while read -r box agent; do
     [[ -n "$box" && -f "$CONFIG/sandboxes/$box" && -f "$ROOT/policy/deny-$agent.txt" ]] || continue
@@ -263,9 +263,15 @@ for line in sys.argv[1].splitlines():
   # sbx kit add appends a mixin to an existing sandbox: new allows, and startup commands that run
   # as root. Its allows show up as provisioned rules, so keep each tartarus sandbox's set as first
   # seen and fail when it grows.
-  local grown=""
-  while read -r box _; do
+  # Adding a kit recreates the container, which a restart doesn't: a new created_at catches a
+  # kit with only startup commands, which the allow check can't see.
+  local grown="" created
+  while read -r box _ created; do
     [[ -n "$box" && -f "$CONFIG/sandboxes/$box" ]] || continue
+    if [[ ! -s "$CONFIG/sandboxes/$box.created" ]]; then echo "$created" > "$CONFIG/sandboxes/$box.created"
+    elif [[ "$(cat "$CONFIG/sandboxes/$box.created")" != "$created" ]]; then
+      grown+="  FAIL  sandbox $box was recreated since tartarus made it (sbx kit add?): tartarus rm $box"$'\n'
+    fi
     local now base="$CONFIG/sandboxes/$box.allows"
     now="$(sandbox_allows "$box" <<<"$policy" 2>/dev/null)" || continue
     if [[ ! -f "$base" ]]; then printf '%s\n' "$now" > "$base"; continue; fi
@@ -438,6 +444,8 @@ $(sanitize <<<"$report")"
   sbx "${args[@]}"
   sbx policy ls --json | sandbox_allows "$name" > "$CONFIG/sandboxes/$name.allows" \
     || die "can't record $name's allows (sbx policy ls)"
+  sbx ls --json | python3 -c 'import json, sys; print(next((s["created_at"] for s in json.load(sys.stdin) if s["name"] == sys.argv[1]), ""))' "$name" \
+    > "$CONFIG/sandboxes/$name.created" || die "can't record when $name was created (sbx ls)"
   [[ -n "$detach" ]] && exit 0
   args=(run --name "$name")
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
@@ -665,7 +673,7 @@ cmd_rm() {
     # Clean the sandbox's own repo, from sbx's record of its workspace, wherever rm runs from.
     repo="$(sandbox_repo "$name")"
     sbx rm --force "$name"
-    rm -f "$CONFIG/sandboxes/$name" "$CONFIG/sandboxes/$name.allows"
+    rm -f "$CONFIG/sandboxes/$name" "$CONFIG/sandboxes/$name".{allows,created}
     [[ -n "$repo" ]] && drop_sandbox_refs "$repo" "$name"
     drop_sandbox_refs . "$name"
   done
