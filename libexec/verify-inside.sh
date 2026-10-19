@@ -80,6 +80,18 @@ if [ -z "$agent_root" ]; then
     done
   done
   [ -z "$swappable" ] && pass "root's PATH holds nothing the agent can change" || bad "agent can change root's PATH:$swappable"
+  # Read-only directories still hold links into the agent's files (~/.local/bin/claude into
+  # ~/.local/share): root running one of those runs code the agent can edit.
+  editable=""
+  for d in $(echo "${rootpath:-$PATH}" | tr ':' ' '); do
+    for f in "$d"/*; do
+      [ -L "$f" ] || continue
+      t="$(readlink -f "$f")"
+      case "$t" in "$ahome"/*|/usr/local/share/npm-global/*|/tmp/*|/var/tmp/*) ;; *) continue ;; esac
+      if agent_can_write "$t" || agent_can_write "$(dirname "$t")"; then editable="$editable $(basename "$f")"; fi
+    done
+  done
+  [ -z "$editable" ] || echo "  info  as root, these run code the agent can edit (use absolute system paths):$editable"
   bashenv="$(tr '\0' '\n' < /proc/1/environ 2>/dev/null | sed -n 's/^BASH_ENV=//p')"
   if [ -n "$bashenv" ] && agent_can_write "$bashenv"; then bad "agent can write $bashenv, which every root bash runs"
   else pass "BASH_ENV file not agent-writable"; fi
