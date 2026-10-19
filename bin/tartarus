@@ -591,7 +591,9 @@ cmd_safe() {
   case "$harness" in
     copilot) cmd=(copilot --sandbox) ;;
     codex) cmd=(codex --sandbox workspace-write) ;;
-    claude) cmd=(claude) ;; # keeps permission prompts on; no sandbox flag to add
+    # Claude's own sandbox for its commands (bubblewrap and socat on Linux, Seatbelt on macOS),
+    # refusing to start without one, with no way out of it and permission prompts kept on.
+    claude) cmd=(claude --settings '{"sandbox": {"enabled": true, "failIfUnavailable": true, "allowUnsandboxedCommands": false, "autoAllowBashIfSandboxed": false}}') ;;
     *) die "unknown harness '$harness' (copilot, claude, codex)" ;;
   esac
   # Drops VAULT_*, AWS_*, SSH_AUTH_SOCK, op-run injections; kubectl sees no clusters.

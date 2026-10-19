@@ -110,6 +110,11 @@ check "run claude --name --kit ." ""
 : > "$TMP/log"; "$ROOT/bin/tartarus" verify -u >/dev/null 2>&1 || true
 grep -q 'exec' "$TMP/log" && { echo "FAIL: verify took a flag as a sandbox name"; fails=1; }
 check "login codex" "sbx secret set openai --oauth"
+# safe runs the harness itself: a stub claude shows what it gets (Claude's own sandbox, fail-closed, scrubbed env).
+printf '#!/bin/sh\necho "claude $*" > "%s/safe"; env > "%s/safe-env"\n' "$TMP" "$TMP" > "$TMP/claude"; chmod +x "$TMP/claude"
+VAULT_TOKEN=x AWS_SECRET_ACCESS_KEY=y "$ROOT/bin/tartarus" safe claude -c >/dev/null 2>&1 || true
+grep -q '"failIfUnavailable": true' "$TMP/safe" && grep -q -- ' -c$' "$TMP/safe" || { echo "FAIL: safe claude: $(cat "$TMP/safe")"; fails=1; }
+grep -qE '^(VAULT|AWS)_' "$TMP/safe-env" && { echo "FAIL: safe kept host secrets in the env"; fails=1; }
 check "login copilot" "sbx secret set copilot"
 check "setup" "sbx daemon restart"
 

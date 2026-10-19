@@ -37,7 +37,7 @@ tartarus ls                              # which sandboxes predate the current l
 
 A sandbox keeps the config it was created with. Change tartarus, a kit, the policy, or a run's paths, and the next `run` makes a new sandbox; with `--name`, it refuses until you `tartarus rm` the old one.
 
-`tartarus safe <harness>` runs the agent on the host in a scrubbed environment when `sbx` isn't available. It is much weaker isolation.
+`tartarus safe <harness>` runs the agent on the host in a scrubbed environment, inside the harness's own sandbox (Claude's needs `bubblewrap` and `socat` on Linux, and refuses to start without them), when `sbx` isn't available. It is much weaker isolation.
 
 ## Configure
 
