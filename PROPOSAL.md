@@ -258,7 +258,7 @@ Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 and 2026-10-19 
 | Signed kits | A modified kit, which runs code in every sandbox | Signed kits install. After a one-line edit without re-signing, `sbx` and `audit` both refuse |
 | Approval prompts | Each blocked request becomes a pending prompt, and one click saves a permanent allow. An agent can trigger prompts on purpose | `audit` fails on any allow created by an approval (tested by approving `example.org` on a probe). Dismiss prompts, never allow them: `tartarus dismiss` clears them all, and `rm` clears the removed sandbox's |
 | No registered MCP servers | The sandbox MCP gateway is a daemon alias that deny rules don't cover. It offers every agent `mcp-find` and `mcp-add`, which pull any server registered on the host into the session at runtime, whatever the sandbox was created with. A registered host stdio server would run commands on the host for any agent | Denying the gateway had no effect, so the control is on the host: `audit` fails if `sbx mcp ls` lists anything. With nothing registered, `mcp-find` finds nothing, `mcp-add` refuses, and `code-mode` (JavaScript in a gateway-run container) can't start without a registered tool (tested); `verify` checks the catalog from inside |
-| Resource limits | A runaway agent starving the host | 4 CPUs and 8 GB by default (`TARTARUS_CPUS`, `TARTARUS_MEMORY`) |
+| Resource limits | A runaway agent starving the host | 4 CPUs and 8 GB by default (`TARTARUS_CPUS`, `TARTARUS_MEMORY`). Disks are capped by `sbx` (v0.48: about 20 GB root, 49 GB workspace, 10 GB Docker), so one sandbox can fill about 80 GB of host disk at most; `tartarus rm` frees it |
 
 ## Risks and limitations
 
