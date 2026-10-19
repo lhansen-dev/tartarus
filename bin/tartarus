@@ -429,8 +429,12 @@ review_branch() {
   git config fetch.fsckObjects true
   # The agent decides how much it sends: cap it, as one pack (unpackLimit=1) of at most 4 GiB
   # (ulimit -f counts KiB), rather than let a planted huge blob fill this disk.
-  (ulimit -f 4194304; git -c fetch.unpackLimit=1 fetch --no-tags --no-recurse-submodules "$remote") \
-    || die "fetching from $name failed (refused objects, or over 4 GiB?)"
+  # And when it stops sending: a server that stalls would hang review (python: macOS has no timeout).
+  (ulimit -f 4194304; python3 -c '
+import subprocess, sys
+try: sys.exit(subprocess.run(sys.argv[1:], timeout=600).returncode)
+except subprocess.TimeoutExpired: sys.exit("fetch took over 10 minutes")' git -c fetch.unpackLimit=1 fetch --no-tags --no-recurse-submodules "$remote") \
+    || die "fetching from $name failed (refused objects, over 4 GiB, or stalled?)"
   # Full refnames from here on: a short name like main can resolve to something else.
   local ref="refs/remotes/$remote/$branch" range
   git rev-parse --verify -q "$ref^{commit}" >/dev/null || {
