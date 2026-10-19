@@ -344,8 +344,8 @@ $report"
 RISKY=(
   # Git: hooks, filters and submodules.
   '\.git(/|$)|\.githooks/|\.husky|\.gitattributes|\.gitmodules|\.lfsconfig|\.pre-commit|lefthook|\.?simple-git-hooks|\.lintstagedrc|lint-staged\.config'
-  # CI: runs with CI secrets once pushed.
-  '\.github/|\.gitlab-ci|\.gitlab/|\.gitea/|\.forgejo/|\.circleci/|Jenkinsfile|\.buildkite/|azure-pipelines|\.travis\.yml|bitbucket-pipelines|\.drone\.yml|cloudbuild|\.woodpecker|appveyor|\.semaphore/|\.tekton/'
+  # CI: runs with CI secrets once pushed. Review rules and bots: who must approve, what auto-merges.
+  'CODEOWNERS|renovate\.json5?$|\.renovaterc|\.github/|\.gitlab-ci|\.gitlab/|\.gitea/|\.forgejo/|\.circleci/|Jenkinsfile|\.buildkite/|azure-pipelines|\.travis\.yml|bitbucket-pipelines|\.drone\.yml|cloudbuild|\.woodpecker|appveyor|\.semaphore/|\.tekton/'
   # IDEs and editors, which run tasks, launch configs and language servers on open.
   '\.vscode/|\.idea/|\.fleet/|\.zed/|\.helix/|\.devcontainer|.*\.code-workspace$|.*\.sublime-project$|\.exrc|\.nvimrc|\.nvim\.lua|\.lazy\.lua|\.dir-locals\.el|\.ycm_extra_conf\.py'
   # Agent config and instructions: prompt injection aimed at the next agent you run on the host.
