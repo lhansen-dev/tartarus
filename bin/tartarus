@@ -245,6 +245,11 @@ for r in json.load(sys.stdin).get("rules") or []:
   # A github secret would let the proxy push to github.com for the agent.
   local secrets; secrets="$(sbx secret ls --quiet)" || { echo "  FAIL  can't list secrets (sbx secret ls)"; fail=1; }
   if grep -qx github <<<"$secrets"; then echo "  FAIL  'github' secret stored"; fail=1; fi
+  # The agent's session writes to this terminal: with set-clipboard on, an OSC 52 escape from the
+  # sandbox sets your clipboard, ready for your next paste into a shell.
+  if command -v tmux >/dev/null && [[ "$(tmux show -gv set-clipboard 2>/dev/null)" == on ]]; then
+    echo "  info  tmux set-clipboard is on: sandboxed programs can set your clipboard (set -g set-clipboard external)"
+  fi
   local old; old="$(cmd_ls 2>/dev/null | grep -cvE ' current$|^Remove ' || true)"
   ((old == 0)) || echo "  info  $old sandbox(es) predate the current lockdown or weren't made by tartarus (tartarus ls)"
   ((fail)) && { echo "audit: FAIL (settings and policy: tartarus setup; others: fix as listed)"; return 1; }
