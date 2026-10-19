@@ -27,6 +27,9 @@ EOF
 chmod +x "$TMP/sbx"
 export PATH="$TMP:$PATH" TARTARUS_BASELINE_KIT=KIT XDG_CONFIG_HOME="$TMP/config"
 "$ROOT/bin/tartarus" setup >/dev/null
+# run writes to the repo it's given (.): use a scratch one, and check this repo comes out untouched.
+own_config="$(git -C "$ROOT" config --local -l 2>/dev/null || true)"
+git init -q "$TMP/repo" && cd "$TMP/repo"
 
 fails=0
 check() { # check "<tartarus args>" "<expected last sbx line>"
@@ -280,6 +283,7 @@ if [[ $rc != 2 || "$out" == *$'\033'* || "$out" == *$'\007'* || "$out" == *$'\30
   echo "FAIL: review escapes (exit $rc)"; printf '%q\n' "$out"; fails=1
 fi
 
+[[ "$(git -C "$ROOT" config --local -l 2>/dev/null || true)" == "$own_config" ]] || { echo "FAIL: the tests changed this repo's git config"; fails=1; }
 if command -v shellcheck >/dev/null; then
   shellcheck -S warning "$ROOT/bin/tartarus" "$ROOT/libexec/verify-inside.sh" "$ROOT/test/tartarus_test.sh" || { echo "FAIL: shellcheck"; fails=1; }
 fi
