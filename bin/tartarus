@@ -290,7 +290,10 @@ d = json.load(sys.stdin); box = sys.argv[1]; ours = set(sys.argv[2:])
 for m in d.get("runtime_mounts") or []:
     print("  FAIL  sandbox %s has %s mounted outside tartarus (sbx umount %s %s)" % (box, m.get("host_path"), box, m.get("host_path")))
 for k in d.get("kits") or []:
-    if k not in ours: print("  FAIL  sandbox %s has a kit tartarus did not add: %s" % (box, k))' "$box" "$BASELINE_KIT" \
+    if k not in ours: print("  FAIL  sandbox %s has a kit tartarus did not add: %s" % (box, k))
+for c in d.get("secrets") or []:  # the gateway sentinel, and the model credentials
+    if c.get("name") not in ("mcpgateway", "anthropic", "openai", "copilot"):
+        print("  FAIL  sandbox %s has a %s secret (sbx secret rm --sandbox %s)" % (box, c.get("name"), box))' "$box" "$BASELINE_KIT" \
       "$ROOT/kits/no-root" "$ROOT/kits/registries" "$COPILOT_KIT" || echo "  FAIL  can't inspect sandbox $box (sbx inspect)")"$'\n'
   done <<<"$boxes"
   insp="$(sed '/^$/d' <<<"$insp")"

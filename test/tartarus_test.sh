@@ -203,7 +203,9 @@ out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a runtime
 echo '{"kits": ["KIT", "docker.io/evil/kit:1"], "runtime_mounts": []}' > "$TMP/state/inspect.json"
 out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a foreign kit"; fails=1; }
 [[ "$out" == *"kit tartarus did not add: docker.io/evil/kit:1"* ]] || { echo "FAIL: audit foreign kit: $out"; fails=1; }
-echo '{"kits": ["KIT"], "runtime_mounts": []}' > "$TMP/state/inspect.json"
+echo '{"kits": ["KIT"], "runtime_mounts": [], "secrets": [{"name": "github"}]}' > "$TMP/state/inspect.json"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a sandbox-scoped github secret"; fails=1; }
+echo '{"kits": ["KIT"], "runtime_mounts": [], "secrets": [{"name": "mcpgateway"}]}' > "$TMP/state/inspect.json"
 "$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit of a clean inspect"; fails=1; }
 rm -f "$TMP/state/inspect.json" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/in"*
 # A port published beyond loopback is an inbound channel to the agent: audit fails.
