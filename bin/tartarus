@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # tartarus: run AI coding agents (Copilot, Claude Code, Codex) inside Docker Sandboxes (sbx).
 set -euo pipefail
+# mapfile, and empty arrays under set -u, need bash 4.4; macOS's /bin/bash is 3.2.
+((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || { echo "tartarus: needs bash 4.4 or later (macOS: brew install bash)" >&2; exit 1; }
 
 ROOT="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"  # resolve symlinks on PATH
 BASELINE_KIT="${TARTARUS_BASELINE_KIT:-$ROOT/kits/team-baseline}"
@@ -72,6 +74,8 @@ EOF
 }
 
 die() { echo "tartarus: $*" >&2; exit 1; }
+# realpath -m (resolve symlinks, allow missing parts) is GNU-only; macOS's realpath has no -m.
+abspath() { python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 # sbx's own rule. Also keeps a name from reaching sbx as a flag (rm --all would remove every sandbox).
 check_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9.-]+$ && "$1" != default ]] || die "invalid sandbox name '$1' (letters, digits, - and .)"; }
 json_eq() { python3 -c 'import json, sys; sys.exit(json.loads(sys.argv[1]) != json.loads(sys.argv[2]))' "$1" "$2" 2>/dev/null; }
@@ -282,15 +286,15 @@ $report"
   done
   ((${#paths[@]})) || paths=(.)
   local i primary extra home
-  primary="$(realpath -m "${paths[0]}")"
-  home="$(realpath -m "$HOME")"
+  primary="$(abspath "${paths[0]}")"
+  home="$(abspath "$HOME")"
   # Home dotdirs hold keys and tokens (.ssh, .aws, .config, .kube); read-only still leaks them.
   holds_dotfiles() { [[ "$home/" == "${1%/}/"* || "$1" == "$home"/.* ]]; }  # ${1%/}: / itself holds home
   holds_dotfiles "$primary" && die "$primary is or holds your home's dotfiles (keys, tokens); run from a repo"
   refuse_exposed "$primary"
   # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.
   for ((i = 1; i < ${#paths[@]}; i++)); do
-    extra="$(realpath -m "${paths[i]%:r[ow]}")"
+    extra="$(abspath "${paths[i]%:r[ow]}")"
     # An extra containing the repo would mount it directly, bypassing clone mode.
     [[ "$primary/" == "${extra%/}/"* || "$extra/" == "$primary/"* ]] \
       && die "extra path ${paths[i]} overlaps the repo $primary; mount siblings only"
@@ -310,7 +314,7 @@ $report"
   # mount and its mode) goes in the default name, and is recorded for a --name, to check here.
   local fp mounts=("$primary")
   for ((i = 1; i < ${#paths[@]}; i++)); do  # extras end in :ro here, or are read-write
-    if [[ "${paths[i]}" == *:ro ]]; then mounts+=("$(realpath -m "${paths[i]%:ro}"):ro"); else mounts+=("$(realpath -m "${paths[i]}"):rw"); fi
+    if [[ "${paths[i]}" == *:ro ]]; then mounts+=("$(abspath "${paths[i]%:ro}"):ro"); else mounts+=("$(abspath "${paths[i]}"):rw"); fi
   done
   # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
   fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/*/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true

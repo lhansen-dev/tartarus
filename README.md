@@ -6,7 +6,7 @@ For the why, threat model and lockdown details, see [PROPOSAL.md](PROPOSAL.md).
 
 ## Install
 
-Requires `sbx` (signed in with `sbx login`), `git`, `python3` and `openssl`. `yq` (either flavour) is optional, for `tartarus config` and the tests.
+Requires `sbx` (signed in with `sbx login`), bash 4.4 or later (macOS ships 3.2: `brew install bash`), `git`, `python3` and `openssl`. `yq` (either flavour) is optional, for `tartarus config` and the tests.
 
 ```sh
 # macOS: brew install docker/tap/sbx    Ubuntu: sudo apt-get install docker-sbx
