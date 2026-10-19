@@ -63,9 +63,26 @@ for h in "${harnesses[@]}"; do
   rc=0; "$T" review "$box" live >"$TMP/review" 2>&1 || rc=$?
   [[ $rc == 2 ]] && grep -q '.github/workflows/x.yml' "$TMP/review" && ok "review flags the CI change" || bad "review (exit $rc)"
 
+  # A branch with no shared history must still be reviewed file by file.
+  sbx exec -w "$TMP/repo" "$box" sh -c 'git checkout -q --orphan orphan && git rm -rqf --cached . >/dev/null; mkdir -p .github/workflows &&
+    touch .github/workflows/o.yml && git add .github && git -c user.name=a -c user.email=a@a commit -qm orphan' >/dev/null 2>&1 || bad "agent orphan commit"
+  rc=0; "$T" review "$box" orphan >"$TMP/review" 2>&1 || rc=$?
+  [[ $rc == 2 ]] && grep -q 'o.yml' "$TMP/review" && ok "review flags an orphan branch" || bad "orphan review (exit $rc)"
+
+  # Drift audit must catch: a lost harness deny, and a kit added after creation.
+  deny="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$ROOT/policy/deny-$h.txt" | grep -v '^$' | head -1)"
+  if [[ -n "$deny" ]]; then
+    sbx policy rm network --sandbox "$box" --resource "$deny" --force >/dev/null 2>&1
+    "$T" audit >/dev/null 2>&1 && bad "audit missed a removed deny ($deny)" || ok "audit catches a removed deny"
+    sbx policy deny network --sandbox "$box" "$deny" >/dev/null 2>&1
+  fi
+  sbx kit add "$box" "$ROOT/kits/registries" >/dev/null 2>&1 || bad "kit add"
+  "$T" audit >/dev/null 2>&1 && bad "audit missed an added kit" || ok "audit catches a kit added later"
+
   "$T" rm "$box" >/dev/null 2>&1 || bad "rm"
   [[ -z "$(git for-each-ref "refs/sandboxes/$box" "refs/remotes/sandbox-$box")" ]] && ok "rm left no refs" || bad "rm left refs"
 done
 
+"$T" audit >/dev/null 2>&1 && ok "audit passes again once they're gone" || bad "audit still fails after rm"
 ((fails)) && { echo "live: FAIL"; exit 1; }
 echo "live: all checks passed"
