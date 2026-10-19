@@ -1,0 +1,4 @@
+# Public-facing prod hostnames sandboxes must never reach; one per line.
+# Private IPs, loopback and link-local are already blocked by sbx.
+# `tartarus setup` applies each line with: sbx policy deny network <host>
+*.prod.yourco.com

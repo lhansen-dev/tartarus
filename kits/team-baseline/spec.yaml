@@ -1,0 +1,18 @@
+# Team defaults layered onto every tartarus sandbox, whatever the harness.
+# Validate with: sbx kit validate ./kits/team-baseline
+schemaVersion: "2"
+kind: mixin
+name: team-baseline
+description: Team defaults for running AI coding agents in sbx
+
+permissions:
+  network:
+    allow:
+      - registry.npmjs.org
+      - pypi.org
+      - files.pythonhosted.org
+
+setup:
+  install:
+    - command: "apt-get update && apt-get install -y jq"
+      description: Common tools agents expect
