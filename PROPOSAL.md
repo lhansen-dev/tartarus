@@ -99,7 +99,7 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
    sbx daemon restart                                  # ssh.* settings only apply after this
    ```
 
-   - **SSH forwarding:** it's on by default [22], and with 1Password's SSH agent it would hand the sandbox every key we hold. If a team needs signed agent commits, run an isolated SSH agent loaded only with an agent-only key [25].
+   - **SSH forwarding:** it's on by default [22], and with 1Password's SSH agent it would hand the sandbox every key we hold. If a team needs signed agent commits, run an isolated SSH agent loaded only with an agent-only key [25], or use Docker's signing kit [26].
    - **Network:** under `deny-all`, the global policy allows nothing. Each sandbox gets only its harness kit's vendor endpoints plus the baseline kit's npm and PyPI [9], [11]. Private IP ranges, loopback and link-local addresses are blocked regardless [17]. `policy/deny.txt` is for prod endpoints with public addresses, such as public APIs and cloud control planes.
    - **Kits:** only kits signed by the team key, plus Docker's own, can be installed. Kits run code inside the sandbox [8].
 
