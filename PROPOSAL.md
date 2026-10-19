@@ -11,7 +11,9 @@
 - `tartarus run <harness>` — run the agent in a hardened sandbox.
 - `tartarus verify <sandbox-name>` — run the host audit and in-sandbox lockdown checks.
 - `tartarus review <sandbox-name> <branch>` — fetch, log, diffstat, and flag files that run on the host.
-- `tartarus rm <sandbox-name>` — remove the sandbox and the refs `sbx` leaves behind.
+- `tartarus rm <sandbox-name>` — remove the sandbox, its approval prompts and the refs `sbx` leaves behind.
+- `tartarus ls` — list sandboxes and flag those made before the current lockdown.
+- `tartarus dismiss` — clear pending approval prompts without allowing any.
 
 ## Summary
 
@@ -238,7 +240,7 @@ with each harness's own sandbox switched on: `copilot --sandbox`, `codex --sandb
 
 ## Lockdown layers
 
-Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 with Claude Code and Codex. Each check also has a control: the same probe with the protection removed, to prove the check can fail. `tartarus verify <sandbox>` re-runs the in-sandbox checks, and `tartarus audit` the host ones.
+Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 and 2026-10-19 with Claude Code and Codex (Copilot: sandbox creation and `verify`, without a Copilot login). Each check also has a control: the same probe with the protection removed, to prove the check can fail. `tartarus verify <sandbox>` re-runs the in-sandbox checks, and `tartarus audit` the host ones.
 
 | Layer | What it stops | How it was proven |
 |---|---|---|
