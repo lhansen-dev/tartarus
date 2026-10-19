@@ -126,6 +126,12 @@ if [ -n "${MCP_GATEWAY_URL:-}" ]; then
     *) echo "  warn  couldn't query the MCP gateway; check sbx mcp ls on the host" ;;
   esac
 fi
+# Host paths reach the VM over virtiofs; a read-write one is a host directory the agent can change
+# (an extra mounted with :rw, or a mount made outside tartarus).
+# mountinfo: optional fields come before the " - " separator, so find the fstype after it.
+rwhost="$(awk '{for (i = 7; i < NF; i++) if ($i == "-") break; if ($(i + 1) == "virtiofs" && $6 ~ /(^|,)rw(,|$)/) print $5}' /proc/self/mountinfo 2>/dev/null)"
+if [ -n "$rwhost" ]; then echo "  info  writable host mounts (fine if you passed :rw):"; echo "$rwhost" | sed 's/^/          /'
+else pass "no writable host mounts"; fi
 if [ -d /run/sandbox/source ]; then
   if touch /run/sandbox/source/.tartarus-write-test 2>/dev/null; then
     rm -f /run/sandbox/source/.tartarus-write-test; bad "host repo writable"
