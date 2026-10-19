@@ -205,7 +205,8 @@ for ip in "$@"; do
   for port in 22 80 443 8080 11434; do
     [ "$(tcp "$ip" "$port")" = closed ] && pass "host $ip:$port unreachable" || bad "host $ip:$port reachable"
   done
-  code="$(http "http://$ip:8080/")"
+  case "$ip" in *:*) u="[$ip]" ;; *) u="$ip" ;; esac
+  code="$(http "http://$u:8080/")"
   case "$code" in 000|403) pass "host $ip via proxy blocked" ;; *) bad "host $ip via proxy reached ($code)" ;; esac
 done
 # The proxy runs on the host, so loopback in any spelling sent through it must not reach host

@@ -620,9 +620,9 @@ print(next((s["workspaces"][0] for s in json.load(sys.stdin) if s["name"] == sys
 
 host_ips() {
   if command -v ip >/dev/null; then
-    ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1
+    ip -o addr show scope global | awk '{print $4}' | cut -d/ -f1  # IPv4 and IPv6
   else
-    ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2}'
+    ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2} /inet6 / && $2 !~ /^(::1|fe80:)/ {sub(/%.*/, "", $2); print $2}'
   fi
 }
 
