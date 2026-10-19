@@ -168,7 +168,7 @@ cmd_audit() {
   # hand-added one, or one saved by approving a blocked-request prompt (agents trigger those on
   # purpose) is not. Every deny.txt host must be in a global deny; an allow naming it doesn't count.
   local policy report hosts
-  hosts="$(deny_hosts)"
+  hosts="$(deny_hosts 2>&1)" || { echo "  FAIL  $hosts"; fail=1; hosts=""; }
   policy="$(sbx policy ls --json)" || policy=""
   report="$(python3 -c '
 import json, sys

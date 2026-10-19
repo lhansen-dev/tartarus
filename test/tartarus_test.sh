@@ -168,6 +168,8 @@ mkdir "$TMP/copy" && cp -r "$ROOT/bin" "$ROOT/kits" "$ROOT/policy" "$ROOT/libexe
 cp -r "$ROOT/policy" "$TMP/badpolicy" && printf 'ok.example\n--all\n' > "$TMP/badpolicy/deny.txt"
 : > "$TMP/log"; out="$(TARTARUS_DENY_FILE="$TMP/badpolicy/deny.txt" TARTARUS_SIGNING_KEY=/dev/null "$ROOT/bin/tartarus" config 2>&1 || true)"
 [[ "$out" == *"not a hostname: --all"* ]] || { echo "FAIL: bad host not refused: $out"; fails=1; }
+out="$(TARTARUS_DENY_FILE="$TMP/badpolicy/deny.txt" "$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a malformed deny list"; fails=1; }
+[[ "$out" == *"not a hostname: --all"* ]] || { echo "FAIL: audit didn't name the bad deny entry: $out"; fails=1; }
 
 # sign-kits with a fresh key on the copy (signing.pub deleted above), then setup with its own config.
 echo '*.evil.example' >> "$TMP/copy/policy/deny-claude.txt"
