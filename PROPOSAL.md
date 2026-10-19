@@ -99,18 +99,20 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
 2. **Harden the machine:** `tartarus setup`. It rebuilds `sbx`'s host configuration from scratch, so it's safe to re-run:
 
    ```bash
-   sbx settings set ssh.agentForwardingEnabled false   # plus clipboard, remote control, skills, SSH auto-create, diagnostics upload: see Lockdown layers
+   sbx settings set ssh.agentForwardingEnabled false   # plus clipboard, remote control, skills, SSH auto-create, diagnostics upload,
+                                                       # proxy bypasses, registry mirror, UDP, MCP gateway: SETTINGS in bin/tartarus
    sbx settings set kit.allowedSources '["docker.io/sbx/"]'
    sbx policy reset --force && sbx policy init deny-all
    sbx policy deny network "<each host in policy/deny.txt>"
-   sbx settings set kit.trustedSigners '[<Docker>, {"key": "~/.config/tartarus/kit-signing.pub"}]'
+   sbx settings set kit.trustedSigners '[<Docker>, {"key": "~/.config/tartarus/kit-signing.pub"}, <Copilot kit workflow>]'
    sbx settings set kit.requireSignature true
    sbx daemon restart                                  # ssh.* settings only apply after this
    ```
 
    - **SSH forwarding:** it's on by default [22], and with 1Password's SSH agent it would hand the sandbox every key we hold. If a team needs signed agent commits, run an isolated SSH agent loaded only with an agent-only key [25], or use Docker's signing kit [26].
    - **Network:** under `deny-all`, the global policy allows nothing. Each sandbox gets only its harness kit's vendor endpoints [9], [11]. npm and PyPI are opt-in per run with `TARTARUS_REGISTRIES=1` (`kits/registries`). Private IP ranges, loopback and link-local addresses are blocked regardless [17]. `policy/deny.txt` is for prod endpoints with public addresses, such as public APIs and cloud control planes.
-   - **Kits and policy:** only kits signed by the team key, plus Docker's own, can be installed. Kits run code inside the sandbox [8]. The `policy/` deny lists are signed with the same key: `setup`, `run`, `verify` and `audit` refuse a list that is edited, unsigned or missing. `setup` also refuses a `kits/signing.pub` that changed since the last setup until you re-run it with `TARTARUS_REPIN=1`, so swapping the key (and re-signing everything) is never silent.
+   - **Proxy bypasses:** `no_proxy`, `no_proxy.sandbox` and a registry mirror would each give sandboxes a route around the policy proxy, a model provider adds an endpoint, and UDP egress isn't proxied at all. `setup` pins them all empty or off, and `audit` fails on drift.
+   - **Kits and policy:** only kits signed by the team key, plus Docker's own, can be installed, and sbx's own refs for former built-in agents get no exemption (`kit.allowExtractedAgents=false`). Kits run code inside the sandbox [8]. The `policy/` deny lists are signed with the same key: `setup`, `run`, `verify` and `audit` refuse a list that is edited, unsigned or missing. `setup` also refuses a `kits/signing.pub` that changed since the last setup until you re-run it with `TARTARUS_REPIN=1`, so swapping the key (and re-signing everything) is never silent.
 
    `tartarus audit` checks all of this at any time, including that no extra kit signer or kit source was added since setup, and `tartarus verify` runs it automatically.
 3. **Give the sandbox only the model credential:** `tartarus login <harness>`.
