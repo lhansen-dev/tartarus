@@ -36,6 +36,8 @@ Usage: tartarus <command> [args]
                                 Fetch the agent's branch to the host without checking it out, and flag
                                 changed files that run code on the host (hooks, CI, IDE tasks, builds).
                                 Exits 2 when any are found.
+  rm <sandbox-name>...          Remove sandboxes and the refs/sandboxes/<name>/* refs sbx keeps in
+                                this repo. Branch anything you want first: git branch X sandbox-<name>/Y
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
@@ -194,6 +196,19 @@ cmd_review() {
   echo; echo "No files that execute on the host changed. Still review the diff before merging."
 }
 
+cmd_rm() {
+  local name
+  (($#)) || die "rm needs one or more sandbox names"
+  for name in "$@"; do
+    sbx rm --force "$name"
+    # sbx rm leaves the fetched refs behind in the host repo.
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+      git for-each-ref --format='%(refname)' "refs/sandboxes/$name/" | while read -r ref; do git update-ref -d "$ref"; done
+      git remote remove "sandbox-$name" 2>/dev/null || true
+    fi
+  done
+}
+
 host_ips() {
   if command -v ip >/dev/null; then
     ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1
@@ -237,6 +252,7 @@ case "${1:-}" in
   run) shift; cmd_run "$@" ;;
   verify) shift; cmd_verify "$@" ;;
   review) shift; cmd_review "$@" ;;
+  rm) shift; cmd_rm "$@" ;;
   safe) shift; cmd_safe "$@" ;;
   ""|-h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;

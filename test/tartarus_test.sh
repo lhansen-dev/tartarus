@@ -28,6 +28,7 @@ check "run gemini" ""
 check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
 check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
 check "run claude ~/a ~/ab" "sbx $R $DC claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
+check "rm a b" "sbx rm --force b"
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
 check "setup" "sbx daemon restart"
