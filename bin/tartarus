@@ -25,7 +25,7 @@ KEYLESS_SIGNERS='[{"identity": "https://github.com/docker/sbx-kits-contrib/.gith
 COPILOT_KIT="docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108"
 
 # Credential shapes: JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens,
-# private keys. libexec/verify-inside.sh scans the sandbox for the same ones.
+# private keys. run, review and verify (inside the sandbox) all scan for these.
 TOKEN_RE='eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY'
 
 # Host settings tartarus pins. `audit` fails if any drifts.
@@ -768,7 +768,7 @@ cmd_verify() {
   # As root: the agent's own processes could ptrace one running as the agent.
   for name in "${names[@]}"; do
     ((${#names[@]} == 1)) || echo "== $name"
-    sbx exec -u root "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" \
+    sbx exec -u root -e TARTARUS_TOKEN_RE="$TOKEN_RE" "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" \
       "$(cat "$CONFIG/sandboxes/$name.mounts" 2>/dev/null)" "${ips[@]}" 127.0.0.1 || fail=1
     echo "Review egress with: sbx policy log $name"
   done

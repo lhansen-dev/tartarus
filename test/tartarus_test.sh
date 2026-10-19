@@ -324,12 +324,13 @@ done
 : > "$TMP/log"; out="$("$ROOT/bin/tartarus" verify box 2>&1 || true)"
 [[ "$out" == *"from the sandbox: ?]0;t?"* ]] || { echo "FAIL: verify output not sanitized"; printf '%q\n' "$out"; fails=1; }
 grep -q '^sbx cp' "$TMP/log" && { echo "FAIL: verify copied files into the sandbox"; fails=1; }
+grep -q '^sbx exec -u root -e TARTARUS_TOKEN_RE=' "$TMP/log" || { echo "FAIL: verify didn't pass the credential patterns"; fails=1; }
 # No name: every sandbox tartarus made, and only those.
 mkdir -p "$TMP/config/tartarus/sandboxes" && echo "1 2 0" > "$TMP/config/tartarus/sandboxes/v1"; printf 'v1\nnotours\n' > "$TMP/state/sandboxes"
 : > "$TMP/log"; "$ROOT/bin/tartarus" verify >/dev/null 2>&1 || true
-[[ "$(grep -c '^sbx exec -u root v1 ' "$TMP/log")" == 1 && "$(grep -c 'notours' "$TMP/log")" == 0 ]] || { echo "FAIL: verify with no name"; fails=1; }
+[[ "$(grep -c '^sbx exec -u root .* v1 sh ' "$TMP/log")" == 1 && "$(grep -c 'notours' "$TMP/log")" == 0 ]] || { echo "FAIL: verify with no name"; fails=1; }
 rm "$TMP/state/sandboxes" "$TMP/config/tartarus/sandboxes/v1"
-grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: verify did not pass the deny list"; fails=1; }
+grep -qF 'TARTARUS_TOKEN_RE=eyJ' "$TMP/log" && grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: verify did not pass the deny list"; fails=1; }
 grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify requires registries blocked"; fails=1; }
 
 # review: a local repo stands in for the sandbox's git remote.

@@ -52,9 +52,10 @@ if env | grep -E '^(VAULT_|AWS_|OP_|GH_TOKEN=|GITHUB_TOKEN=|ANTHROPIC_API_KEY=|O
   | grep -vE 'proxymanaged|proxy-managed'; then bad "host secrets in env"; else pass "no host secrets in env"; fi
 if ssh-add -l >/dev/null 2>&1; then bad "SSH agent reachable"; else pass "no SSH agent"; fi
 # Real credentials stay on the host; the agent's config should only ever hold proxy sentinels.
-# JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens, private keys.
+# The credential shapes come from bin/tartarus (TOKEN_RE), passed in as TARTARUS_TOKEN_RE.
 # -D skip: a FIFO the agent left in place of a file would hang a read.
-if grep -D skip -rlsE 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY' \
+[ -n "${TARTARUS_TOKEN_RE:-}" ] || bad "no credential patterns passed in (TARTARUS_TOKEN_RE)"
+if grep -D skip -rlsE "${TARTARUS_TOKEN_RE:-^$}" \
   "$ahome"/.claude "$ahome"/.claude.json "$ahome"/.codex "$ahome"/.copilot "$ahome"/.config "$ahome"/.docker "$ahome"/.gitconfig \
   "$ahome"/.git-credentials "$ahome"/.netrc "$ahome"/.npmrc "$ahome"/.pypirc "$ahome"/.aws "$ahome"/.ssh "$ahome"/.kube \
   /run/secrets 2>/dev/null | grep -v '/projects/'; then
