@@ -244,7 +244,7 @@ for r in json.load(sys.stdin).get("rules") or []:
   local boxes pairs="" box agent reg h
   boxes="$(sbx ls --json | python3 -c 'import json, sys; [print(s["name"], s["agent"], s.get("created_at", "")) for s in json.load(sys.stdin)]' 2>/dev/null)" \
     || { echo "  FAIL  can't list sandboxes (sbx ls --json)"; fail=1; }
-  while read -r box agent; do
+  while read -r box agent _; do
     [[ -n "$box" && -f "$CONFIG/sandboxes/$box" && -f "$ROOT/policy/deny-$agent.txt" ]] || continue
     reg="$(cut -s -d' ' -f3 "$CONFIG/sandboxes/$box")"
     for h in $(hosts_in "$ROOT/policy/deny-$agent.txt" 2>/dev/null); do

@@ -169,7 +169,7 @@ echo 10.0.0.0/8 > "$TMP/state/no_proxy.sandbox"; check "run claude" ""; : > "$TM
 echo "{\"rules\": [$D]}" > "$TMP/state/policy"; check "run claude" ""; rm "$TMP/state/policy"
 # A tartarus sandbox that lost one of its harness denies fails audit; with all of them it passes.
 mkdir -p "$TMP/config/tartarus/sandboxes" && echo "1 2 0" > "$TMP/config/tartarus/sandboxes/cx"
-echo '[{"name": "cx", "agent": "codex", "workspaces": []}]' > "$TMP/state/ls.json"
+echo '[{"name": "cx", "agent": "codex", "workspaces": [], "created_at": "T0"}]' > "$TMP/state/ls.json"
 rules="$D, $W"; for h in github.com api.github.com codeload.github.com registry.npmjs.org releases.openai.com files.openai.com; do
   rules+=", {\"scope\": \"sandbox:cx\", \"resource_type\": \"network\", \"decision\": \"deny\", \"resources\": [\"$h\"]}"; done
 echo "{\"rules\": [$rules]}" > "$TMP/state/policy"
