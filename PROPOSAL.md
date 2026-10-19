@@ -41,7 +41,7 @@ Every agent session runs in `sbx`, whatever the task and whatever the harness. T
 
 | Harness | `sbx` agent | Starts as (inside the VM) | Credential, held on the host | Extra kit |
 |---|---|---|---|---|
-| GitHub Copilot CLI | `copilot` | `copilot --yolo` [20] | `copilot` secret only (Copilot API) [21] | `docker.io/sbx/copilot-kit` [21] |
+| GitHub Copilot CLI | `copilot` | `copilot --yolo` [20] | `copilot` secret only (Copilot API) [21] | `docker.io/sbx/copilot-kit`, pinned by digest [21] |
 | Claude Code | `claude` | `claude --dangerously-skip-permissions` [28] | `/login` OAuth inside the sandbox, or `anthropic` API key [22] | none |
 | Codex | `codex` | `codex --dangerously-bypass-approvals-and-sandbox` [29] | `openai` via `--oauth` on the host [22] | none |
 
@@ -124,15 +124,14 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
    ```bash
    sbx run --clone --skills off --cpus 4 --memory 8g \
      --kit kits/team-baseline --kit kits/no-root \
-     [--kit docker.io/sbx/copilot-kit:latest]           # copilot only
      --deny-network <each host in policy/deny-<harness>.txt> \
-     --name tartarus-<harness>-<repo>-<lockdown fingerprint> \
-     <copilot|claude|codex> [paths...] [-- agent args]
+     --name tartarus-<harness>-<repo>-<fingerprint> \
+     <claude|codex|copilot-kit@sha256:...> [paths...] [-- agent args]   # Copilot's kit goes in the agent's place
    ```
 
    In clone mode the agent works on a private in-VM clone, and the host repository is mounted read-only [18]. Arguments after `--` that start with `-` are added after the harness's autonomy flags; a bare word replaces them [28], [29].
 
-   The default name ends in a fingerprint of the launcher, kits and policies. `sbx` ignores creation flags when it re-attaches to an existing sandbox, so without the fingerprint, a hardening change would silently not apply to a sandbox you already have. With it, any such change gives you a fresh sandbox.
+   Before that, `run` refuses a machine that fails `audit`, and paths that would show the agent secrets (see Multi-repo work). The default name ends in a fingerprint of the launcher, kits, policies, the repo's full path and every mount with its mode. An existing sandbox keeps the config it was created with (`sbx` refuses creation flags on re-attach), so without the fingerprint a hardening change would never reach a sandbox you already have. With it, any such change gives you a fresh sandbox. For a `--name`, `run` records the fingerprint and refuses to re-attach when it differs, or to a sandbox it didn't create.
 
 Sandboxes don't pick up user-level harness config such as `~/.claude` or `~/.codex`; only project-level config in the workspace is visible [28], [29]. Shared agent instructions (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`) therefore belong in the repo, or in the baseline kit's `files/home/`.
 
