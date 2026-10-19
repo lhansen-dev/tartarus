@@ -90,6 +90,8 @@ hosts_in() {
   [[ -z "$hosts" ]] || echo "$hosts"
 }
 deny_hosts() { hosts_in "$DENY_FILE"; }
+# Hosts kits/registries allows; TARTARUS_REGISTRIES=1 lifts a harness deny on them.
+registry_hosts() { sed -n 's/^ *- *\([A-Za-z0-9.-]*\) *$/\1/p' "$ROOT/kits/registries/spec.yaml"; }
 
 # Policy files are signed like kits: an edited deny list would quietly loosen every sandbox.
 # A missing file or signature fails too, so deleting a list can't open it up. No key, no check.
@@ -252,6 +254,7 @@ $report"
   local host denies
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
   denies="$(hosts_in "$ROOT/policy/deny-$harness.txt")"
+  [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && denies="$(grep -vxF -f <(registry_hosts) <<<"$denies" || true)"
   while read -r host; do if [[ -n "$host" ]]; then args+=(--deny-network "$host"); fi; done <<<"$denies"
   local paths=() rest=()
   while (($#)); do
@@ -473,7 +476,8 @@ cmd_verify() {
   mapfile -t ips < <(host_ips)
   # Every denied host must be blocked in any sandbox (wildcards can't be requested directly).
   local blocked f
-  blocked="$({ deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' || true)"
+  # Registries are reported apart: a sandbox started with TARTARUS_REGISTRIES=1 reaches them.
+  blocked="$({ deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' | grep -vxF -f <(registry_hosts) || true)"
   # The script goes in as an argument, not a file: the agent can rewrite anything it can write.
   sbx exec "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
   echo "Review egress with: sbx policy log $name"

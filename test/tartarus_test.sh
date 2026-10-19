@@ -36,12 +36,15 @@ check() { # check "<tartarus args>" "<expected last sbx line>"
 R="run --clone --skills off --cpus 4 --memory 8g --kit KIT --kit $ROOT/kits/no-root"
 DC="--deny-network mcp-proxy.anthropic.com --deny-network bridge.claudeusercontent.com"
 DC+=" --deny-network downloads.claude.ai --deny-network claude.ai --deny-network console.anthropic.com"
+DC+=" --deny-network claude.com --deny-network code.claude.com"
 DX="--deny-network github.com --deny-network api.github.com --deny-network codeload.github.com"
+DXR="$DX"; DX+=" --deny-network registry.npmjs.org"
 check "run claude" "sbx $R $DC claude ."
 check "run codex --name xy --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
   "sbx $R $DX --name xy --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
 check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit:latest copilot ."
-export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."; unset TARTARUS_REGISTRIES
+export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."
+check "run codex" "sbx $R --kit $ROOT/kits/registries $DXR codex ."; unset TARTARUS_REGISTRIES
 check "run gemini" ""
 check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
 check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
@@ -164,6 +167,7 @@ sh -n "$ROOT/libexec/verify-inside.sh" || { echo "FAIL: verify-inside.sh syntax"
 : > "$TMP/log"; "$ROOT/bin/tartarus" verify box >/dev/null 2>&1 || true
 grep -q '^sbx cp' "$TMP/log" && { echo "FAIL: verify copied files into the sandbox"; fails=1; }
 grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: verify did not pass the deny list"; fails=1; }
+grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify requires registries blocked"; fails=1; }
 
 # review: a local repo stands in for the sandbox's git remote.
 (
