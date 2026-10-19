@@ -12,7 +12,8 @@ Requires `sbx` (signed in with `sbx login`), bash 4.4 or later (macOS ships 3.2:
 # macOS: brew install docker/tap/sbx    Ubuntu: sudo apt-get install docker-sbx
 ln -s "$PWD/bin/tartarus" ~/.local/bin/tartarus
 tartarus setup    # harden sbx on this machine; restarts the sbx daemon, stopping running sandboxes
-tartarus audit    # check the machine still matches setup (run does this too, and refuses to start if it fails)
+tartarus audit    # check the machine still matches setup: settings, policy, secrets, MCP, ports, each sandbox's
+                  # denies and allows (run does this too, and refuses to start if it fails)
 ```
 
 ## Use
@@ -24,8 +25,8 @@ cd ~/Dev/my-repo
 tartarus run claude --name feat1         # agent works on a private clone; host repo is read-only
 tartarus run claude . ../shared-lib      # extra paths mount read-only; add :rw to make one writable
                                          # refuses paths with untracked .env/keys or tokens in .git/config
-TARTARUS_REGISTRIES=1 tartarus run claude  # also allow npm and PyPI for this sandbox
-tartarus verify feat1                    # audit plus in-sandbox lockdown checks
+TARTARUS_REGISTRIES=1 tartarus run claude  # also allow npm and PyPI (read-only: no publish) for this sandbox
+tartarus verify feat1                    # audit plus in-sandbox lockdown checks (no name: all of tartarus's)
 
 tartarus review feat1 <branch>           # fetch the agent's branch without checking it out;
                                          # exits 2 if it touched hooks, CI, IDE tasks or build files
