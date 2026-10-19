@@ -294,6 +294,8 @@ for f in rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper
   [[ "$out" == *"  $f"* ]] || { echo "FAIL: review missed $f"; fails=1; }
 done
 [[ "${out#*REVIEW BEFORE}" != *environment.ts* && "${out#*REVIEW BEFORE}" != *props.md* ]] || { echo "FAIL: review flagged plain source"; fails=1; }
+cmd="$(sed -n 's/^See just those changes: //p' <<<"$out")"
+[[ "$(cd "$TMP/host" && eval "$cmd" | grep -c '^diff --git')" -ge 15 ]] || { echo "FAIL: review's diff command: $cmd"; fails=1; }
 rc=0; out="$(review sneaky)" || rc=$?
 if [[ $rc != 2 || "$out" != *".VSCode/tasks.json"* || "$out" != *".vscode/tâsks.json"* || "$out" != *"eslint.config.mjs"* \
   || "$out" != *"notes (symlink)"* || "${out#*REVIEW BEFORE}" == *workspace* ]]; then

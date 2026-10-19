@@ -447,6 +447,10 @@ Reviewed $tip. Take exactly that commit, not the branch, which moves on the next
   if [[ -n "$risky" ]]; then
     echo; echo "REVIEW BEFORE CHECKOUT, BUILD OR OPENING IN AN IDE (these run code on the host):"
     printf '%s\n' "$risky" | sed 's/^/  /'
+    # Shell-quoted: the names are the agent's. :(literal) stops git reading them as pathspec magic.
+    local f quoted=()
+    while IFS= read -r f; do quoted+=("$(printf '%q' ":(literal)${f% (symlink)}")"); done <<<"$(sed 's/ (submodule)$//' <<<"$risky")"
+    echo; echo "See just those changes: git diff ${base:0:12} ${tip:0:12} -- ${quoted[*]}"
     echo; echo "$after"
     return 2
   fi
