@@ -39,6 +39,8 @@ for h in "${harnesses[@]}"; do
   # The host repo is read-only, and the network goes nowhere but the model API.
   expect_fail "writing the host repo" "$box" 'touch /run/sandbox/source/x'
   expect_fail "reaching example.com" "$box" 'curl -sf -m 8 -o /dev/null https://example.com'
+  # Refused with or without TARTARUS_REGISTRIES=1: registries are read-only.
+  expect_fail "a write to npm (publish)" "$box" 'curl -sf -m 8 -o /dev/null -X PUT -d {} https://registry.npmjs.org/tartarus-live'
   expect_fail "direct DNS" "$box" 'python3 -I -c "import socket; s=socket.socket(2,2); s.settimeout(4); s.sendto(b\"x\"*12, (\"8.8.8.8\", 53)); s.recv(9)"'
 
   # The trust handoff: an agent commit with CI changes and a tag named main.
