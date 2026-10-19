@@ -30,7 +30,8 @@ tartarus verify feat1                    # audit plus in-sandbox lockdown checks
 tartarus review feat1 <branch>           # fetch the agent's branch without checking it out;
                                          # exits 2 if it touched hooks, CI, IDE tasks or build files
 git branch my-feature sandbox-feat1/<branch>
-tartarus rm feat1
+tartarus rm feat1                        # also dismisses its pending approval prompts
+tartarus dismiss                         # dismiss every pending prompt; never allow one
 ```
 
 `tartarus safe <harness>` runs the agent on the host in a scrubbed environment when `sbx` isn't available. It is much weaker isolation.

@@ -50,8 +50,11 @@ Usage: tartarus <command> [args]
                                 Exits 2 when any are found.
   sign-kits                     Sign kits/*/ and policy/*.txt with the team key (made on first use, kept
                                 outside the repo); commit kits/signing.pub and the signature files
-  rm <sandbox-name>...          Remove sandboxes and the refs/sandboxes/<name>/* refs sbx keeps in
-                                this repo. Branch anything you want first: git branch X sandbox-<name>/Y
+  dismiss [sandbox-name...]     Dismiss pending approval prompts (all, or the named sandboxes'). Never allow
+                                one: approving saves a permanent allow that audit then fails on.
+  rm <sandbox-name>...          Remove sandboxes, their approval prompts, and the refs/sandboxes/<name>/*
+                                refs sbx keeps in this repo. Branch anything you want first:
+                                git branch X sandbox-<name>/Y
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
@@ -163,7 +166,7 @@ print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if 
   [[ -z "$approved" ]] || { echo "  FAIL  allows created by approving prompts:"; indent "$approved"; fail=1; }
   local pending
   pending="$(sbx policy approval ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
-  ((pending == 0)) || echo "  info  $pending pending approval prompt(s): dismiss them, don't allow (sbx policy approval ls)"
+  ((pending == 0)) || echo "  info  $pending pending approval prompt(s): never allow them; clear them with tartarus dismiss"
   # A host named only in an allow rule doesn't count; it must be in a global deny.
   local missing hosts; hosts="$(deny_hosts)"
   missing="$(python3 -c '
@@ -425,10 +428,23 @@ cmd_config() {
   echo "Change a kit or policy file, then: tartarus sign-kits. Change policy or settings, then: tartarus setup."
 }
 
+# Dismiss (never allow) pending approval prompts: all of them, or those of the named sandboxes.
+cmd_dismiss() {
+  local name id box n=0
+  for name in "$@"; do check_name "$name"; done
+  while read -r id box _; do
+    [[ $# == 0 || " $* " == *" $box "* ]] || continue
+    sbx policy approval respond "$id" --option dismiss >/dev/null && n=$((n + 1))
+  done < <(sbx policy approval ls | tail -n +2)
+  echo "tartarus: dismissed $n approval prompt(s)"
+}
+
 cmd_rm() {
   local name
   (($#)) || die "rm needs one or more sandbox names"
   for name in "$@"; do check_name "$name"; done
+  # A removed sandbox's prompts can only ever be allowed by mistake.
+  cmd_dismiss "$@"
   for name in "$@"; do
     sbx rm --force "$name"
     # sbx rm leaves the fetched refs behind in the host repo.
@@ -486,6 +502,7 @@ case "${1:-}" in
   verify) shift; cmd_verify "$@" ;;
   review) shift; cmd_review "$@" ;;
   rm) shift; cmd_rm "$@" ;;
+  dismiss) shift; cmd_dismiss "$@" ;;
   sign-kits) shift; cmd_sign_kits "$@" ;;
   safe) shift; cmd_safe "$@" ;;
   ""|-h|--help|help) usage ;;

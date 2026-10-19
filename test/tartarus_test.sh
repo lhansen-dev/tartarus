@@ -14,7 +14,7 @@ case "\$*" in
   "settings set "*) printf '%s\n' "\$4" > "\$S/\$3" ;;
   "settings unset "*) rm -f "\$S/\$3" ;;
   "policy ls --json"*) cat "\$S/policy" 2>/dev/null || echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}]}'; exit 0 ;;
-  "policy approval ls") echo HEADER; exit 0 ;;
+  "policy approval ls") cat "\$S/approvals" 2>/dev/null || echo HEADER; exit 0 ;;
   "kit verify "*) exit 0 ;;
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
   "secret ls --quiet") exit 0 ;;
@@ -71,6 +71,14 @@ check "run claude $TMP/sec $TMP/lib" ""
 rm "$TMP/lib/conf/credentials.json"
 check "run claude $TMP/sec $TMP/lib" "sbx $R $DC claude $TMP/sec $TMP/lib:ro"
 check "rm ab cd" "sbx rm --force cd"
+printf 'APPROVAL SANDBOX TITLE\nnet:1 ab x.com:443 d\nnet:2 cd y.com:443 d\nnet:3 ab z.com:443 d\n' > "$TMP/state/approvals"
+: > "$TMP/log"; "$ROOT/bin/tartarus" rm ab >/dev/null 2>&1
+[[ "$(cat "$TMP/log")" == $'sbx policy approval respond net:1 --option dismiss\nsbx policy approval respond net:3 --option dismiss\nsbx rm --force ab' ]] \
+  || { echo "FAIL: rm did not dismiss only its prompts first:"; cat "$TMP/log"; fails=1; }
+: > "$TMP/log"; out="$("$ROOT/bin/tartarus" dismiss)"
+[[ "$(grep -c 'option dismiss' "$TMP/log")" == 3 && "$out" == *"dismissed 3"* ]] || { echo "FAIL: dismiss all"; cat "$TMP/log"; fails=1; }
+grep -q 'option allow' "$TMP/log" && { echo "FAIL: something allowed a prompt"; fails=1; }
+rm "$TMP/state/approvals"
 check "rm ab --all" ""                    # a flag as a name: refused before anything is removed
 check "run claude --name --kit ." ""
 : > "$TMP/log"; "$ROOT/bin/tartarus" verify -u >/dev/null 2>&1 || true
