@@ -180,7 +180,11 @@ if [ -n "$reached" ] && curl -q -s -m 8 -H 'Host: example.com' "$reached" 2>/dev
   bad "domain fronting: example.com reached via $reached"; else pass "no domain fronting via the allowed host"; fi
 # npm and PyPI are opt-in (TARTARUS_REGISTRIES=1); report which way this sandbox went.
 case "$(http https://registry.npmjs.org/)" in 000|403) pass "package registries blocked" ;;
-  *) echo "  info  npm reachable (sandbox started with TARTARUS_REGISTRIES=1?)" ;; esac
+  *) echo "  info  npm reachable (sandbox started with TARTARUS_REGISTRIES=1?)"
+     # Reads only: a publish with a token planted in a prompt would upload.
+     code="$(curl -q -s -o /dev/null -m 8 -X PUT -d '{}' -w '%{http_code}' https://registry.npmjs.org/tartarus-verify 2>/dev/null)"
+     case "$code" in 000|403) pass "npm refuses writes ($code)" ;; *) bad "npm accepts writes ($code): tartarus setup" ;; esac ;;
+esac
 [ "$(tcp gateway.docker.internal 3128)" = open ] && pass "TCP probe detects an open port (proxy)" \
   || echo "  warn  TCP probe can't see the proxy; direct TCP results below may be false passes"
 for url in https://example.com http://example.com https://s3.amazonaws.com https://storage.googleapis.com \

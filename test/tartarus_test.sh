@@ -14,7 +14,7 @@ case "\$*" in
   "settings set "*) printf '%s\n' "\$4" > "\$S/\$3" ;;
   "settings unset "*) rm -f "\$S/\$3" ;;
   "policy ls --json --created-via approval") cat "\$S/approved" 2>/dev/null || echo '{"rules": []}'; exit 0 ;;
-  "policy ls --json"*) [ -f "\$S/broken" ] && exit 1; cat "\$S/policy" 2>/dev/null || echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}]}'; exit 0 ;;
+  "policy ls --json"*) [ -f "\$S/broken" ] && exit 1; cat "\$S/policy" 2>/dev/null || echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}, {"scope": "global", "resource_type": "http", "decision": "deny", "resources": ["registry.npmjs.org", "pypi.org", "files.pythonhosted.org"], "methods": ["DELETE", "PATCH", "POST", "PUT"]}]}'; exit 0 ;;
   "policy approval ls") cat "\$S/approvals" 2>/dev/null || echo HEADER; exit 0 ;;
   "kit verify "*) exit 0 ;;
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
@@ -121,7 +121,8 @@ check "setup" "sbx daemon restart"
 : > "$TMP/log"; "$ROOT/bin/tartarus" setup >/dev/null
 for want in "sbx settings set ssh.agentForwardingEnabled false" "sbx settings set clipboard.imagePaste false" \
   "sbx settings set skills.defaultMode off" "sbx policy reset --force" "sbx policy init deny-all" \
-  "sbx policy deny network *.prod.yourco.com" "sbx settings set kit.requireSignature true" "sbx daemon restart"; do
+  "sbx policy deny network *.prod.yourco.com" "sbx policy deny network --method PUT,POST,PATCH,DELETE registry.npmjs.org" \
+  "sbx settings set kit.requireSignature true" "sbx daemon restart"; do
   grep -qxF "$want" "$TMP/log" || { echo "FAIL: setup missing: $want"; fails=1; }
 done
 grep -qF "sbx settings set kit.trustedSigners [{\"key\": \"$TMP/config/tartarus/kit-signing.pub\"}, {\"identity\": \"https://github.com/docker/sbx-kits-contrib/" "$TMP/log" \
@@ -153,11 +154,14 @@ echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "al
 check "run claude" ""; rm "$TMP/state/policy"
 # A hand-added per-sandbox allow counts too; a kit's own (provisioned) allow doesn't.
 D='{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}'
-echo "{\"rules\": [$D, {\"scope\": \"sandbox:ab\", \"resource_type\": \"network\", \"decision\": \"allow\", \"resources\": [\"pastebin.com\"], \"provenance\": {\"created_via\": \"added\"}}]}" > "$TMP/state/policy"
+W='{"scope": "global", "resource_type": "http", "decision": "deny", "resources": ["registry.npmjs.org", "pypi.org", "files.pythonhosted.org"], "methods": ["DELETE", "PATCH", "POST", "PUT"]}'
+echo "{\"rules\": [$D, $W, {\"scope\": \"sandbox:ab\", \"resource_type\": \"network\", \"decision\": \"allow\", \"resources\": [\"pastebin.com\"], \"provenance\": {\"created_via\": \"added\"}}]}" > "$TMP/state/policy"
 check "run claude" ""
 sed -i 's/"added"/"provisioned"/' "$TMP/state/policy"; check "run claude" "sbx $R $DC claude ."; rm "$TMP/state/policy"
 # A no_proxy entry would let traffic skip the policy proxy: drift there fails audit too.
 echo 10.0.0.0/8 > "$TMP/state/no_proxy.sandbox"; check "run claude" ""; : > "$TMP/state/no_proxy.sandbox"
+# Without the registry write denies, audit fails (npm publish would be an upload channel).
+echo "{\"rules\": [$D]}" > "$TMP/state/policy"; check "run claude" ""; rm "$TMP/state/policy"
 # sbx failing to answer fails audit, rather than reading as "nothing wrong" (audit runs with set -e off).
 echo '{"rules": [{"scope": "sandbox:ab", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/approved"
 check "run claude" ""; rm "$TMP/state/approved"

@@ -115,6 +115,7 @@ hosts_in() {
   [[ -z "$hosts" ]] || echo "$hosts"
 }
 deny_hosts() { hosts_in "$DENY_FILE"; }
+REGISTRY_WRITES=PUT,POST,PATCH,DELETE
 # Hosts kits/registries allows; TARTARUS_REGISTRIES=1 lifts a harness deny on them.
 registry_hosts() { sed -n 's/^ *- *\([A-Za-z0-9.-]*\) *$/\1/p' "$ROOT/kits/registries/spec.yaml"; }
 
@@ -154,6 +155,9 @@ cmd_setup() {
   sbx policy reset --force </dev/null
   sbx policy init deny-all
   deny_hosts | while read -r host; do sbx policy deny network "$host"; done
+  # With TARTARUS_REGISTRIES=1 a sandbox reaches npm and PyPI. Installs only read; a publish
+  # with a token planted in a prompt would upload. The proxy sees methods, so deny the writes.
+  registry_hosts | while read -r host; do sbx policy deny network --method "$REGISTRY_WRITES" "$host"; done
   # With a team key, only kits it signed (plus Docker's built-in agents) can be installed. The
   # key is pinned outside the repo, so a changed signing.pub needs a deliberate re-run of setup.
   if [[ -f "$REPO_PUB" ]]; then
@@ -196,9 +200,13 @@ for r in rules:
     if r["resource_type"] == "network" and r["decision"] == "allow" and (r["scope"] == "global" or via != "provisioned"):
         fix = "" if r["scope"] == "global" else "  (sbx policy rm network --sandbox %s --resource HOST --force)" % r["scope"].split(":", 1)[-1]
         print("  FAIL  network allow (%s, %s): %s%s" % (r["scope"], via, ", ".join(r["resources"]), fix))
-denied = {h for r in rules if r["scope"] == "global" and r["decision"] == "deny" for h in r["resources"]}
+denied = {h for r in rules if r["scope"] == "global" and r["decision"] == "deny" and not r.get("methods") for h in r["resources"]}
 for h in sys.argv[1].split():
-    if h not in denied: print("  FAIL  deny rule missing: " + h)' "$hosts" <<<"$policy" 2>/dev/null)" \
+    if h not in denied: print("  FAIL  deny rule missing: " + h)
+want = set(sys.argv[3].split(","))
+writes = {h for r in rules if r["scope"] == "global" and r["decision"] == "deny" and want <= set(r.get("methods") or []) for h in r["resources"]}
+for h in sys.argv[2].split():
+    if h not in writes: print("  FAIL  registry write deny missing: " + h + " (" + sys.argv[3] + ")")' "$hosts" "$(registry_hosts)" "$REGISTRY_WRITES" <<<"$policy" 2>/dev/null)" \
     || report="  FAIL  can't read the sbx policy (sbx policy ls --json)"
   # Approval-made allows are listed apart too, in case the full listing ever leaves them out.
   report+="$(sbx policy ls --json --created-via approval | python3 -c '
