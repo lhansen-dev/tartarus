@@ -172,7 +172,9 @@ cmd_run() {
 }
 
 # Files that run code on the host when you build, test, open or commit: the trust-handoff path.
-RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.mcp\.json|\.envrc|\.npmrc|\.yarnrc|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|.*\.gradle|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|conftest\.py|tox\.ini|noxfile\.py|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules)'
+# Agent instruction files are included: text an agent plants there steers the next agent you
+# run on the host, outside the sandbox. Dependency manifests run code when installed.
+RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.buildkite/|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.cursor/|\.mcp\.json|CLAUDE\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.envrc|\.direnv/|mise\.toml|\.mise\.toml|\.tool-versions|flake\.nix|shell\.nix|default\.nix|\.npmrc|\.yarnrc|\.pnpmfile|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|.*\.gradle(\.kts)?$|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|requirements.*\.txt|Pipfile|conftest\.py|tox\.ini|noxfile\.py|Gemfile|.*\.gemspec$|Rakefile|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules)'
 
 cmd_review() {
   local name="${1:-}" branch="${2:-}"

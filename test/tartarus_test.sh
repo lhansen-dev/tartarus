@@ -53,13 +53,13 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
   git init -q -b main host && git -C host commit -q --allow-empty -m init
   git clone -q host agent && cd agent
   git checkout -q -b safe && echo hi > README.md && git add -A && git commit -q -m safe
-  git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json && git add -A && git commit -q -m risky
+  git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json CLAUDE.md docs.md && git add -A && git commit -q -m risky
   cd ../host && git remote add sandbox-box ../agent
 ) >/dev/null
 review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
 out="$(review safe)" || { echo "FAIL: review safe exited $?"; fails=1; }
 rc=0; out="$(review risky)" || rc=$?
-if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "${out#*REVIEW BEFORE}" == *README* ]]; then
+if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "$out" != *"  CLAUDE.md"* || "${out#*REVIEW BEFORE}" == *docs.md* || "${out#*REVIEW BEFORE}" == *README* ]]; then
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
 fi
 
