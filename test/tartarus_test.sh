@@ -175,6 +175,15 @@ out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a sandbox
 echo "{\"rules\": [$rules, {\"scope\": \"sandbox:cx\", \"resource_type\": \"network\", \"decision\": \"deny\", \"resources\": [\"openai.com\"]}]}" > "$TMP/state/policy"
 "$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit with all of a sandbox's denies"; fails=1; }
 rm "$TMP/state/policy" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/cx"
+# Allows a sandbox gains after tartarus first saw it (sbx kit add) fail audit.
+echo "1 2 0" > "$TMP/config/tartarus/sandboxes/ka"; echo '[{"name": "ka", "agent": "shell"}]' > "$TMP/state/ls.json"
+A='{"scope": "sandbox:ka", "resource_type": "network", "decision": "allow", "resources": ["api.anthropic.com"], "provenance": {"created_via": "provisioned"}}'
+echo "{\"rules\": [$D, $W, $A]}" > "$TMP/state/policy"
+"$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: first audit of a sandbox's allows"; fails=1; }
+echo "{\"rules\": [$D, $W, $A, ${A/api.anthropic.com/pypi.org}]}" > "$TMP/state/policy"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a sandbox that gained an allow"; fails=1; }
+[[ "$out" == *"ka gained allows"*"pypi.org"* ]] || { echo "FAIL: audit allow growth: $out"; fails=1; }
+rm -f "$TMP/state/policy" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/ka"*
 # A port published beyond loopback is an inbound channel to the agent: audit fails.
 echo '[{"name": "pb", "agent": "claude"}]' > "$TMP/state/ls.json"
 echo '[{"host_ip": "127.0.0.1", "host_port": 1, "sandbox_port": 9418}]' > "$TMP/state/ports.json"

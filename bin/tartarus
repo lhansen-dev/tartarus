@@ -259,6 +259,22 @@ for line in sys.argv[1].splitlines():
     if ("sandbox:" + box, host) not in denied: print("  FAIL  sandbox %s lost its deny for %s (tartarus rm %s; the next run recreates it)" % (box, host, box))' "$pairs" <<<"$policy" 2>/dev/null)" \
     || report="  FAIL  can't check the sandboxes' deny rules"
   [[ -z "$report" ]] || { echo "$report"; fail=1; }
+  # sbx kit add appends a mixin to an existing sandbox: new allows, and startup commands that run
+  # as root. Its allows show up as provisioned rules, so keep each tartarus sandbox's set as first
+  # seen and fail when it grows.
+  local grown=""
+  while read -r box _; do
+    [[ -n "$box" && -f "$CONFIG/sandboxes/$box" ]] || continue
+    local now base="$CONFIG/sandboxes/$box.allows"
+    now="$(python3 -c '
+import json, sys
+print("\n".join(sorted({h for r in json.load(sys.stdin)["rules"] if r["scope"] == "sandbox:" + sys.argv[1]
+  and r["resource_type"] == "network" and r["decision"] == "allow" for h in r["resources"]})))' "$box" <<<"$policy" 2>/dev/null)" || continue
+    if [[ ! -f "$base" ]]; then printf '%s\n' "$now" > "$base"; continue; fi
+    local added; added="$(LC_ALL=C comm -13 "$base" <(printf '%s\n' "$now") | sed '/^$/d' | paste -sd' ' -)"
+    [[ -z "$added" ]] || grown+="  FAIL  sandbox $box gained allows since tartarus first saw it (sbx kit add?): $added"$'\n'
+  done <<<"$boxes"
+  [[ -z "$grown" ]] || { printf '%s' "$grown"; fail=1; }
   # A published port is an inbound channel to the agent that egress rules never see; one bound
   # beyond loopback lets anyone on the network talk to it. sbx's own git daemon is on loopback.
   local ports
@@ -636,7 +652,7 @@ cmd_rm() {
     # Clean the sandbox's own repo, from sbx's record of its workspace, wherever rm runs from.
     repo="$(sandbox_repo "$name")"
     sbx rm --force "$name"
-    rm -f "$CONFIG/sandboxes/$name"
+    rm -f "$CONFIG/sandboxes/$name" "$CONFIG/sandboxes/$name.allows"
     [[ -n "$repo" ]] && drop_sandbox_refs "$repo" "$name"
     drop_sandbox_refs . "$name"
   done
