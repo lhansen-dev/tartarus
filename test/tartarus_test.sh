@@ -45,6 +45,10 @@ done
 grep -qF "sbx settings set kit.trustedSigners [{\"key\": \"$TMP/config/tartarus/kit-signing.pub\"}]" "$TMP/log" \
   || { echo "FAIL: setup did not trust the pinned key"; fails=1; }
 
+out="$(TARTARUS_CPUS=2 TARTARUS_BASELINE_KIT="$ROOT/kits/team-baseline" "$ROOT/bin/tartarus" config)"
+[[ "$out" == *"allow       registry.npmjs.org, pypi.org, files.pythonhosted.org"* && "$out" == *"Deny (codex)  github.com,"* \
+  && "$out" == *"cpus=2 memory=8g"* ]] || { echo "FAIL: config"; echo "$out"; fails=1; }
+
 # Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
 name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true
   grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log"; }

@@ -35,6 +35,7 @@ Usage: tartarus <command> [args]
                                 Resets the global network policy (per-sandbox kit rules are kept)
                                 and restarts the sbx daemon, which stops running sandboxes.
   audit                         Check this machine's sbx settings, policy and secrets match setup
+  config                        Show every setting, its current value and where to change it
   login <harness>               Store the harness credential in the host keychain (never enters the VM)
   run <harness> [--name N] [--detach] [path...] [-- agent args]
                                 Start the harness in a clone-mode sandbox with the team kit.
@@ -272,6 +273,27 @@ cmd_sign_kits() {
   echo "tartarus: commit kits/signing.pub and kits/*/kit.sig.bundle, then run tartarus setup"
 }
 
+# Read-only: where each setting lives and what it is now.
+cmd_config() {
+  local f
+  list() { paste -sd, - | sed 's/,/, /g'; }
+  # Works with both yq flavours (Python/jq and Go); config is only a viewer, so yq stays optional.
+  allows() { command -v yq >/dev/null || { echo "(install yq to list)"; return; }
+    yq -r '(.permissions.network.allow // [])[]' "$1/spec.yaml" 2>/dev/null; }
+  echo "Baseline kit  $BASELINE_KIT  ($( [[ -f "$BASELINE_KIT/kit.sig.bundle" ]] && echo "has kit.sig.bundle" || echo unsigned))  TARTARUS_BASELINE_KIT"
+  echo "  allow       $(allows "$BASELINE_KIT" | list)"
+  echo "Deny (global) $DENY_FILE: $(hosts_in "$DENY_FILE" | list)  TARTARUS_DENY_FILE"
+  for f in "$ROOT"/policy/deny-*.txt; do
+    printf '%-14s%s\n' "Deny ($(basename "$f" .txt | sed 's/^deny-//'))" "$(hosts_in "$f" | list)"
+  done
+  echo "Resources     cpus=$CPUS memory=$MEMORY  TARTARUS_CPUS / TARTARUS_MEMORY"
+  echo "Root          $( [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] && echo kept || echo "dropped (kits/no-root)")  TARTARUS_ALLOW_ROOT=1 keeps it"
+  echo "Kit sources   $KIT_SOURCES  TARTARUS_KIT_SOURCES"
+  echo "Signing key   $SIGNING_KEY  TARTARUS_SIGNING_KEY"
+  echo "Pinned        ${SETTINGS[*]}  (edit SETTINGS in bin/tartarus)"
+  echo "Change policy or settings, then: tartarus setup. Change a kit, then: tartarus sign-kits."
+}
+
 cmd_rm() {
   local name
   (($#)) || die "rm needs one or more sandbox names"
@@ -324,6 +346,7 @@ cmd_safe() {
 case "${1:-}" in
   setup) shift; cmd_setup "$@" ;;
   audit) shift; cmd_audit "$@" ;;
+  config) shift; cmd_config "$@" ;;
   login) shift; cmd_login "$@" ;;
   run) shift; cmd_run "$@" ;;
   verify) shift; cmd_verify "$@" ;;
