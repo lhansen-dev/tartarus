@@ -212,6 +212,11 @@ cmd_review() {
   [[ -n "$name" && -n "$branch" ]] || die "review needs a sandbox name and branch"
   local remote="sandbox-$name" base
   git fetch "$remote"
+  git rev-parse --verify -q "$remote/$branch" >/dev/null || {
+    echo "tartarus: no branch '$branch' in $name; it has:" >&2
+    git for-each-ref --format='  %(refname:lstrip=3)' "refs/remotes/$remote/" >&2
+    return 1
+  }
   base="$(git rev-parse --abbrev-ref HEAD)"
   git log --oneline "$base..$remote/$branch"
   git diff --stat "$base...$remote/$branch"
