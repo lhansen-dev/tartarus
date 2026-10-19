@@ -280,16 +280,6 @@ $report"
   holds_dotfiles() { [[ "$home/" == "${1%/}/"* || "$1" == "$home"/.* ]]; }  # ${1%/}: / itself holds home
   holds_dotfiles "$primary" && die "$primary is or holds your home's dotfiles (keys, tokens); run from a repo"
   refuse_exposed "$primary"
-  # sbx ignores creation flags when it re-attaches to an existing sandbox, so the default name
-  # carries a fingerprint of the lockdown config: harden tartarus and you get a fresh sandbox.
-  if [[ " ${args[*]} " != *" --name "* ]]; then
-    local fp
-    # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
-    fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/no-root/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
-      echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-} ${TARTARUS_REGISTRIES:-}"; } | cksum | cut -d' ' -f1)"
-    local base; base="$(basename "$primary")"
-    args+=(--name "tartarus-$harness-${base//[^A-Za-z0-9.-]/-}-$fp")  # sbx names: letters, digits, - and .
-  fi
   # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.
   for ((i = 1; i < ${#paths[@]}; i++)); do
     extra="$(realpath -m "${paths[i]%:r[ow]}")"
@@ -304,6 +294,20 @@ $report"
       *) paths[i]+=":ro" ;;
     esac
   done
+  # sbx ignores creation flags when it re-attaches to an existing sandbox, so the default name
+  # carries a fingerprint of everything it was created with: the lockdown config, the repo's
+  # full path (two repos named app must not share one) and every mount with its mode.
+  if [[ " ${args[*]} " != *" --name "* ]]; then
+    local fp mounts=("$primary")
+    for ((i = 1; i < ${#paths[@]}; i++)); do  # extras end in :ro here, or are read-write
+      if [[ "${paths[i]}" == *:ro ]]; then mounts+=("$(realpath -m "${paths[i]%:ro}"):ro"); else mounts+=("$(realpath -m "${paths[i]}"):rw"); fi
+    done
+    # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
+    fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/*/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
+      echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-} ${TARTARUS_REGISTRIES:-}"; printf '%s\n' "${mounts[@]}"; } | cksum | cut -d' ' -f1)"
+    local base; base="$(basename "$primary")"
+    args+=(--name "tartarus-$harness-${base//[^A-Za-z0-9.-]/-}-$fp")  # sbx names: letters, digits, - and .
+  fi
   args+=("$harness" "${paths[@]}")
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
   exec sbx "${args[@]}"

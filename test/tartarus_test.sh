@@ -168,6 +168,13 @@ name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/de
   grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log"; }
 n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 [[ -n "$n1" && "$n1" == "$n2" && "$n1" != "$n3" ]] || { echo "FAIL: fingerprint names: '$n1' '$n2' '$n3'"; fails=1; }
+# Same basename elsewhere, or the same mount with another mode, is a different sandbox.
+name_args() { : > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$@" >/dev/null 2>&1 || true; grep -oE -- '--name [^ ]+' "$TMP/log"; }
+mkdir -p "$TMP/a/app" "$TMP/b/app" "$TMP/lib"
+na="$(name_args "$TMP/a/app")"; nb="$(name_args "$TMP/b/app")"
+nro="$(name_args "$TMP/a/app" "$TMP/lib")"; nro2="$(name_args "$TMP/a/app" "$TMP/lib:ro")"; nrw="$(name_args "$TMP/a/app" "$TMP/lib:rw")"
+[[ -n "$na" && "$na" != "$nb" && "$na" != "$nro" && "$nro" == "$nro2" && "$nro" != "$nrw" ]] \
+  || { echo "FAIL: fingerprint ignores paths: '$na' '$nb' '$nro' '$nro2' '$nrw'"; fails=1; }
 : > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$TMP/my_repo (2)" >/dev/null 2>&1 || true
 grep -qE -- '--name tartarus-claude-my-repo--2--[0-9]+ ' "$TMP/log" || { echo "FAIL: name not sanitized: $(cat "$TMP/log")"; fails=1; }
 : > "$TMP/log"; "$ROOT/bin/tartarus" run claude --name mine . >/dev/null 2>&1 || true
