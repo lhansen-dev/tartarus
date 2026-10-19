@@ -40,7 +40,10 @@ fails=0
 check() { # check "<tartarus args>" "<expected last sbx line>"
   : > "$TMP/log"
   eval "$ROOT/bin/tartarus $1" >/dev/null 2>&1 || true
-  local got; got="$(tail -n1 "$TMP/log" | sed -E 's/ --name tartarus-[a-z]+-[^ ]+-[0-9]+//')"
+  # The creation call when there is one (run creates detached, then attaches), else the last call.
+  local got; got="$(grep -- ' --clone ' "$TMP/log" | tail -n1 | sed 's/ --detach//' || true)"
+  [[ -n "$got" ]] || got="$(tail -n1 "$TMP/log")"
+  got="$(sed -E 's/ --name tartarus-[a-z]+-[^ ]+-[0-9]+//' <<<"$got")"
   if [[ "$got" != "$2" ]]; then echo "FAIL: tartarus $1"; echo "  want: $2"; echo "  got:  $got"; fails=1; fi
 }
 
@@ -53,7 +56,7 @@ DXO="--deny-network releases.openai.com --deny-network files.openai.com --deny-n
 DXR="$DX $DXO"; DX+=" --deny-network registry.npmjs.org $DXO"
 check "run claude" "sbx $R $DC claude ."
 check "run codex --name xy --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
-  "sbx $R $DX --name xy --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
+  "sbx $R $DX --name xy codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
 check "run copilot" "sbx $R --deny-network github.com --deny-network api.github.com docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108 ."
 export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."
 check "run codex" "sbx $R --kit $ROOT/kits/registries $DXR codex ."; unset TARTARUS_REGISTRIES
@@ -73,7 +76,7 @@ check "run claude ~/a /" ""
 # The repo itself is mounted read-only: credentials in .git/config or untracked secret files leak.
 git init -q "$TMP/sec" && touch "$TMP/sec/.env.example" "$TMP/sec/notes.key.md"
 check "run claude $TMP/sec" "sbx $R $DC claude $TMP/sec"
-n="$(grep -oE -- '--name [^ ]+' "$TMP/log" | cut -d' ' -f2)"
+n="$(grep -oE -- '--name [^ ]+' "$TMP/log" | head -1 | cut -d' ' -f2)"
 [[ "$(git -C "$TMP/sec" config "remote.sandbox-$n.tagOpt")" == --no-tags && "$(git -C "$TMP/sec" config fetch.fsckObjects)" == true ]] \
   || { echo "FAIL: run did not protect the repo from the sandbox remote"; fails=1; }
 git -C "$TMP/sec" remote add origin https://x:ghp_token@github.com/a/b
@@ -248,7 +251,7 @@ echo extra.example >> "$TMP/copy/policy/deny-claude.txt"
 
 # Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
 name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true
-  grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log"; }
+  grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log" | head -1; }
 n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 [[ -n "$n1" && "$n1" == "$n2" && "$n1" != "$n3" ]] || { echo "FAIL: fingerprint names: '$n1' '$n2' '$n3'"; fails=1; }
 # Re-attaching by --name needs the config the sandbox was made with; sbx would keep the old one.
@@ -269,7 +272,7 @@ rc=0; out="$("$ROOT/bin/tartarus" ls)" || rc=$?
 rm "$TMP/state/sandboxes"
 
 # Same basename elsewhere, or the same mount with another mode, is a different sandbox.
-name_args() { : > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$@" >/dev/null 2>&1 || true; grep -oE -- '--name [^ ]+' "$TMP/log"; }
+name_args() { : > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$@" >/dev/null 2>&1 || true; grep -oE -- '--name [^ ]+' "$TMP/log" | head -1; }
 mkdir -p "$TMP/a/app" "$TMP/b/app" "$TMP/lib"
 na="$(name_args "$TMP/a/app")"; nb="$(name_args "$TMP/b/app")"
 nro="$(name_args "$TMP/a/app" "$TMP/lib")"; nro2="$(name_args "$TMP/a/app" "$TMP/lib:ro")"; nrw="$(name_args "$TMP/a/app" "$TMP/lib:rw")"
@@ -278,7 +281,9 @@ nro="$(name_args "$TMP/a/app" "$TMP/lib")"; nro2="$(name_args "$TMP/a/app" "$TMP
 : > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$TMP/my_repo (2)" >/dev/null 2>&1 || true
 grep -qE -- '--name tartarus-claude-my-repo--2--[0-9]+ ' "$TMP/log" || { echo "FAIL: name not sanitized: $(cat "$TMP/log")"; fails=1; }
 : > "$TMP/log"; "$ROOT/bin/tartarus" run claude --name mine . >/dev/null 2>&1 || true
-[[ "$(grep -o -- '--name [^ ]*' "$TMP/log")" == "--name mine" ]] || { echo "FAIL: explicit --name overridden"; fails=1; }
+[[ -f "$TMP/config/tartarus/sandboxes/mine.allows" && "$(tail -n1 "$TMP/log")" == "sbx run --name mine" ]] \
+  || { echo "FAIL: run didn't record allows and then attach: $(tail -n1 "$TMP/log")"; fails=1; }
+[[ "$(grep -o -- '--name [^ ]*' "$TMP/log" | sort -u)" == "--name mine" ]] || { echo "FAIL: explicit --name overridden"; fails=1; }
 
 # verify passes the script and deny list as arguments: files in the sandbox's /tmp are the agent's to swap.
 sh -n "$ROOT/libexec/verify-inside.sh" || { echo "FAIL: verify-inside.sh syntax"; fails=1; }

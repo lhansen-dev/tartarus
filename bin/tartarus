@@ -266,10 +266,7 @@ for line in sys.argv[1].splitlines():
   while read -r box _; do
     [[ -n "$box" && -f "$CONFIG/sandboxes/$box" ]] || continue
     local now base="$CONFIG/sandboxes/$box.allows"
-    now="$(python3 -c '
-import json, sys
-print("\n".join(sorted({h for r in json.load(sys.stdin)["rules"] if r["scope"] == "sandbox:" + sys.argv[1]
-  and r["resource_type"] == "network" and r["decision"] == "allow" for h in r["resources"]})))' "$box" <<<"$policy" 2>/dev/null)" || continue
+    now="$(sandbox_allows "$box" <<<"$policy" 2>/dev/null)" || continue
     if [[ ! -f "$base" ]]; then printf '%s\n' "$now" > "$base"; continue; fi
     local added; added="$(LC_ALL=C comm -13 "$base" <(printf '%s\n' "$now") | sed '/^$/d' | paste -sd' ' -)"
     [[ -z "$added" ]] || grown+="  FAIL  sandbox $box gained allows since tartarus first saw it (sbx kit add?): $added"$'\n'
@@ -428,11 +425,20 @@ $(sanitize <<<"$report")"
     [[ "$(cut -d' ' -f1 "$record" 2>/dev/null)" == "$fp" ]] || die "sandbox $name exists with another config, or wasn't made by tartarus, and sbx would keep its old settings; tartarus rm $name, or use another --name"
     # No agent: the sandbox keeps its own (the fingerprint covers it), and a kit here would make a new one.
     args=(run --name "$name" ${detach:+"$detach"})
-  else
-    # The lockdown for tartarus ls; the registries flag for audit, which checks the harness denies.
-    mkdir -p "$CONFIG/sandboxes" && echo "$fp $lockdown ${TARTARUS_REGISTRIES:-0}" > "$record"
-    args+=(--name "$name" ${detach:+"$detach"} "$agent" "${paths[@]}")
+    ((${#rest[@]})) && args+=(-- "${rest[@]}")
+    exec sbx "${args[@]}"
   fi
+  # The lockdown for tartarus ls; the registries flag for audit, which checks the harness denies.
+  mkdir -p "$CONFIG/sandboxes" && echo "$fp $lockdown ${TARTARUS_REGISTRIES:-0}" > "$record"
+  # Create detached, so the allows can be recorded before anything else touches the sandbox
+  # (audit fails if they grow, e.g. by sbx kit add), then attach.
+  args+=(--name "$name" --detach "$agent" "${paths[@]}")
+  [[ -n "$detach" ]] && ((${#rest[@]})) && args+=(-- "${rest[@]}")
+  sbx "${args[@]}"
+  sbx policy ls --json | sandbox_allows "$name" > "$CONFIG/sandboxes/$name.allows" \
+    || die "can't record $name's allows (sbx policy ls)"
+  [[ -n "$detach" ]] && exit 0
+  args=(run --name "$name")
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
   exec sbx "${args[@]}"
 }
@@ -601,6 +607,12 @@ cmd_config() {
   echo "Pinned sbx settings (SETTINGS in bin/tartarus):"; printf '  %s\n' "${SETTINGS[@]}"
   echo "Change a kit or policy file, then: tartarus sign-kits. Change policy or settings, then: tartarus setup."
 }
+
+# A sandbox's network allows, sorted (C order, for comm), from sbx policy ls --json on stdin.
+sandbox_allows() { python3 -c '
+import json, sys
+print("\n".join(sorted({h for r in json.load(sys.stdin)["rules"] if r["scope"] == "sandbox:" + sys.argv[1]
+  and r["resource_type"] == "network" and r["decision"] == "allow" for h in r["resources"]})))' "$1"; }
 
 # The repo a sandbox works on, from sbx's record of its workspace ("" if unknown).
 sandbox_repo() { sbx ls --json 2>/dev/null | python3 -c '
