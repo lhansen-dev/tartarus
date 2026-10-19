@@ -3,14 +3,26 @@
 # Runs inside a sandbox (passed in by `tartarus verify`). Exits non-zero if any wall is down.
 # Args: newline-separated hosts that must be blocked, then host IPs to prove unreachable
 # (the host's LAN/VPN addresses).
-# The agent can write its home: only system dirs on PATH, and no rc files or user site-packages
-# (python3 -I, curl -q, HOME for dig), so a planted ~/.local/bin/curl, .curlrc or usercustomize.py
-# can't fake a pass.
+# Runs as root: the agent's processes share the agent's uid, and with no Yama in the VM they could
+# ptrace a verify running as the agent and rewrite its results. Checks that need the agent's view
+# go through as_agent; the agent's files are only ever read. Only system dirs on PATH, and no rc
+# files or user site-packages (python3 -I, curl -q, root's HOME), so nothing the agent planted runs.
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+HOME=/root; export HOME
 blocked="$1"; shift
 fail=0
 pass() { echo "  ok    $1"; }
 bad() { echo "  FAIL  $1"; fail=1; }
+[ "$(id -u)" = 0 ] || { bad "verify-inside needs root (sbx exec -u root)"; exit 1; }
+agent_uid=1000
+ahome="$(getent passwd "$agent_uid" | cut -d: -f6)"; ahome="${ahome:-/home/agent}"
+# sbx exec adds the sudo and docker groups to every agent session, whatever /etc/group says.
+agent_groups="$agent_uid"
+for g in sudo docker; do gid="$(getent group "$g" | cut -d: -f3)"; [ -n "$gid" ] && agent_groups="$agent_groups,$gid"; done
+as_agent() { setpriv --reuid="$agent_uid" --regid="$agent_uid" --groups="$agent_groups" -- "$@"; }
+# The shell's own test: this image's /usr/bin/test (uutils) reads mode bits and misses read-only mounts.
+# shellcheck disable=SC2016 # $1 is for the inner sh
+agent_can_write() { as_agent sh -c 'test -w "$1"' sh "$1"; }
 
 # Direct TCP, bypassing the proxy. Prints "open" only if real data comes back: sbx's
 # interceptor accepts every connect and then closes it empty, so a bare connect proves nothing.
@@ -41,43 +53,48 @@ if env | grep -E '^(VAULT_|AWS_|OP_|GH_TOKEN=|GITHUB_TOKEN=|ANTHROPIC_API_KEY=|O
 if ssh-add -l >/dev/null 2>&1; then bad "SSH agent reachable"; else pass "no SSH agent"; fi
 # Real credentials stay on the host; the agent's config should only ever hold proxy sentinels.
 # JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens, private keys.
-if grep -rlsE 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY' \
-  ~/.claude ~/.claude.json ~/.codex ~/.copilot ~/.config ~/.docker ~/.gitconfig ~/.git-credentials ~/.netrc ~/.npmrc \
-  ~/.pypirc ~/.aws ~/.ssh ~/.kube /run/secrets 2>/dev/null | grep -v '/projects/'; then
+# -D skip: a FIFO the agent left in place of a file would hang a read.
+if grep -D skip -rlsE 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY' \
+  "$ahome"/.claude "$ahome"/.claude.json "$ahome"/.codex "$ahome"/.copilot "$ahome"/.config "$ahome"/.docker "$ahome"/.gitconfig \
+  "$ahome"/.git-credentials "$ahome"/.netrc "$ahome"/.npmrc "$ahome"/.pypirc "$ahome"/.aws "$ahome"/.ssh "$ahome"/.kube \
+  /run/secrets 2>/dev/null | grep -v '/projects/'; then
   bad "real-looking tokens in agent config (files above)"; else pass "agent config holds no real tokens"; fi
-if command -v kubectl >/dev/null && kubectl config current-context >/dev/null 2>&1; then
-  bad "kube context set"; else pass "no kube context"; fi
+# Read, not run: kubectl as root on the agent's kubeconfig would run its exec plugins.
+if grep -D skip -qsE '^current-context: *[^ "]' "$ahome/.kube/config"; then bad "kube context set"; else pass "no kube context"; fi
 
-if [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; then echo "  info  agent has root (TARTARUS_ALLOW_ROOT=1?)"
+agent_root=""
+if as_agent sudo -n true 2>/dev/null; then agent_root=1; echo "  info  agent has root (TARTARUS_ALLOW_ROOT=1?)"
 else pass "agent has no root"; fi
-if docker ps >/dev/null 2>&1; then echo "  info  agent can use Docker (root in the guest)"; fi
+if agent_can_write /var/run/docker.sock; then echo "  info  agent can use Docker (root in the guest)"; fi
 # Root processes (startup commands, dockerd, sbx exec -u root) inherit PID 1's PATH and BASH_ENV,
 # which the agent can read: a command it plants or a directory it swaps anywhere on that PATH
 # runs as root on the next start. Swapping needs a writable parent and a path that isn't a mount point.
-if [ "$(id -u)" != 0 ] && ! sudo -n true 2>/dev/null; then
+if [ -z "$agent_root" ]; then
   rootpath="$(tr '\0' '\n' < /proc/1/environ 2>/dev/null | sed -n 's/^PATH=//p')"
   swappable=""
   for d in $(echo "${rootpath:-$PATH}" | tr ':' ' '); do
-    if [ -e "$d" ] && [ -w "$d" ]; then swappable="$swappable $d"; continue; fi
+    if [ -e "$d" ] && agent_can_write "$d"; then swappable="$swappable $d"; continue; fi
     while [ "$d" != / ]; do  # any ancestor the agent could rename, with the PATH dir inside it
-      if [ -w "$(dirname "$d")" ] && ! mountpoint -q "$d"; then swappable="$swappable $d"; break; fi
+      if agent_can_write "$(dirname "$d")" && ! mountpoint -q "$d"; then swappable="$swappable $d"; break; fi
       d="$(dirname "$d")"
     done
   done
   [ -z "$swappable" ] && pass "root's PATH holds nothing the agent can change" || bad "agent can change root's PATH:$swappable"
   bashenv="$(tr '\0' '\n' < /proc/1/environ 2>/dev/null | sed -n 's/^BASH_ENV=//p')"
-  if [ -n "$bashenv" ] && [ -w "$bashenv" ]; then bad "agent can write $bashenv, which every root bash runs"
+  if [ -n "$bashenv" ] && agent_can_write "$bashenv"; then bad "agent can write $bashenv, which every root bash runs"
   else pass "BASH_ENV file not agent-writable"; fi
 fi
 
 # A sandbox outlives its session: a hook, a global instruction file or an extra MCP server the
 # agent writes into its own config steers every later session here. A fresh image has none.
-planted="$(python3 -I - <<'EOF'
-import json, os, re
-home = os.path.expanduser("~")
-def load(p):
+planted="$(python3 -I - "$ahome" <<'EOF'
+import json, os, re, sys
+home = sys.argv[1]
+def load(p):  # regular files only, and not too much: the agent chose what's there
+    p = os.path.join(home, p)
+    if not os.path.isfile(p): return None
     try:
-        with open(os.path.join(home, p)) as f: return f.read()
+        with open(p, errors="replace") as f: return f.read(1 << 20)
     except OSError: return None
 found = []
 s = load(".claude/settings.json")
@@ -201,7 +218,7 @@ for ip in 8.8.8.8 1.1.1.1; do
   [ "$(udp "$ip")" = closed ] && pass "no direct UDP DNS to $ip" || bad "direct UDP DNS to $ip answered"
 done
 [ "$(tcp 2606:4700:4700::1111 443)" = closed ] && pass "no direct IPv6 TCP" || bad "direct IPv6 TCP to 2606:4700:4700::1111"
-if [ -n "$(HOME=/nonexistent dig +short +time=3 +tries=1 example.com 2>/dev/null)" ]; then bad "DNS resolves public names"; else pass "DNS for public names blocked"; fi
+if [ -n "$(dig +short +time=3 +tries=1 example.com 2>/dev/null)" ]; then bad "DNS resolves public names"; else pass "DNS for public names blocked"; fi
 
 [ "$fail" = 0 ] && echo "PASS: all walls standing" || echo "FAIL: see above"
 exit "$fail"

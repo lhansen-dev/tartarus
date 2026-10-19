@@ -542,7 +542,8 @@ cmd_verify() {
   # Registries are reported apart: a sandbox started with TARTARUS_REGISTRIES=1 reaches them.
   blocked="$({ deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' | grep -vxF -f <(registry_hosts) || true)"
   # The script goes in as an argument, not a file: the agent can rewrite anything it can write.
-  sbx exec "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
+  # As root: the agent's own processes could ptrace one running as the agent.
+  sbx exec -u root "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
   echo "Review egress with: sbx policy log $name"
   return "$fail"
 }
