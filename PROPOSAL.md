@@ -4,6 +4,15 @@
 
 > In Greek myth, Tartarus is the prison that held the Titans: powerful, and kept where they can't reach the world above. Tartarus does the same for coding agents.
 
+## Quick start
+
+- `tartarus setup` — harden the machine (rebuilds `sbx`'s host configuration).
+- `tartarus login <harness>` — give the sandbox only the model credential.
+- `tartarus run <harness>` — run the agent in a hardened sandbox.
+- `tartarus verify <sandbox-name>` — run the host audit and in-sandbox lockdown checks.
+- `tartarus review <sandbox-name> <branch>` — fetch, log, diffstat, and flag files that run on the host.
+- `tartarus rm <sandbox-name>` — remove the sandbox and the refs `sbx` leaves behind.
+
 ## Summary
 
 Teams should run their AI coding agents inside Docker Sandboxes (`sbx`) by default, for every session, whether interactive or fully autonomous. The agent then has no route or credentials to production. Tartarus is harness-agnostic: one command, one kit and one policy cover GitHub Copilot CLI, Claude Code and Codex. This is an opt-in team pattern, not a mandate, and it keeps autopilot fully available.
