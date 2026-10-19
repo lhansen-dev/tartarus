@@ -253,5 +253,9 @@ if [[ $rc != 2 || "$out" == *$'\033'* || "$out" == *$'\007'* || "$out" == *$'\30
   echo "FAIL: review escapes (exit $rc)"; printf '%q\n' "$out"; fails=1
 fi
 
+if command -v shellcheck >/dev/null; then
+  shellcheck -S warning "$ROOT/bin/tartarus" "$ROOT/libexec/verify-inside.sh" "$ROOT/test/tartarus_test.sh" || { echo "FAIL: shellcheck"; fails=1; }
+fi
+
 ((fails)) && exit 1
 echo "all tests passed"
