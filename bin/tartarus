@@ -258,25 +258,42 @@ cmd_run() {
 # point a package at any tarball URL without a manifest change.
 RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.buildkite/|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.cursor/|\.mcp\.json|CLAUDE\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.envrc|\.direnv/|mise\.toml|\.mise\.toml|\.tool-versions|flake\.nix|shell\.nix|default\.nix|\.npmrc|\.yarnrc|\.pnpmfile|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|poetry\.lock|uv\.lock|Pipfile\.lock|pdm\.lock|Cargo\.lock|go\.sum|Gemfile\.lock|composer\.(json|lock)|.*\.gradle(\.kts)?$|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|requirements.*\.txt|Pipfile|conftest\.py|tox\.ini|noxfile\.py|Gemfile|.*\.gemspec$|Rakefile|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules|\.lfsconfig|\.cargo/|\.yarn/|bunfig\.toml|deno\.jsonc?$|\.bazelrc|BUILD(\.bazel)?$|WORKSPACE(\.bazel)?$|MODULE\.bazel|meson\.build|configure(\.ac)?$|pytest\.ini|sitecustomize\.py|usercustomize\.py|.*\.pth$|.*\.config\.[cm]?[jt]s$|\.[a-z]+rc\.[cm]?js$|\.zed/|\.gemini/|\.aider|\.continue/|\.windsurf/|\.clinerules|\.exrc|\.nvimrc|\.nvim\.lua|.*\.code-workspace$)'
 
+# Commit messages and file names come from the agent: escape sequences in them could erase or
+# fake the warnings below, so control characters (C0, DEL and C1) print as '?'.
+sanitize() { python3 -c '
+import re, sys
+sys.stdin.reconfigure(errors="replace")
+sys.stdout.write(re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "?", sys.stdin.read()))'; }
+
 cmd_review() {
+  local rc=0
+  review_branch "$@" 2>&1 | sanitize || rc=$?
+  return "$rc"
+}
+
+review_branch() {
   local name="${1:-}" branch="${2:-}"
   [[ -n "$name" && -n "$branch" ]] || die "review needs a sandbox name and branch"
-  local remote="sandbox-$name" base
-  git fetch "$remote"
-  git rev-parse --verify -q "$remote/$branch" >/dev/null || {
-    echo "tartarus: no branch '$branch' in $name; it has:" >&2
-    git for-each-ref --format='  %(refname:lstrip=3)' "refs/remotes/$remote/" >&2
+  # --no-tags: the agent's tags would land in this repo, where a tag named main shadows the
+  # branch (here and in every later git command) and a v1.2.3 can reach a release pipeline.
+  local remote="sandbox-$name"
+  git fetch --no-tags "$remote"
+  # Full refnames from here on: a short name like main can resolve to something else.
+  local ref="refs/remotes/$remote/$branch" range
+  git rev-parse --verify -q "$ref^{commit}" >/dev/null || {
+    echo "tartarus: no branch '$branch' in $name; it has:"
+    git for-each-ref --format='  %(refname:lstrip=3)' "refs/remotes/$remote/"
     return 1
   }
-  base="$(git rev-parse --abbrev-ref HEAD)"
-  git log --oneline "$base..$remote/$branch"
-  git diff --stat "$base...$remote/$branch"
+  range="HEAD...$ref"
+  git log --oneline "HEAD..$ref"
+  git diff --stat "$range"
   # -z: no quoting of odd names to slip past ^; --no-renames: list both ends of a move;
   # -i: case-insensitive filesystems (macOS) open .VSCode/ as .vscode/.
   local risky links
-  risky="$(git diff --no-renames --name-only -z "$base...$remote/$branch" | grep -izE "$RISKY_PATHS" | tr '\0' '\n' || true)"
+  risky="$(git diff --no-renames --name-only -z "$range" | grep -izE "$RISKY_PATHS" | tr '\0' '\n' || true)"
   # A symlink can point a build or IDE at any host file once checked out.
-  links="$(git diff --no-renames --raw "$base...$remote/$branch" | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"}')"
+  links="$(git diff --no-renames --raw "$range" | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"}')"
   risky="$(printf '%s\n%s' "$risky" "$links" | sed '/^$/d')"
   # The list only covers files that run on their own. Running tests or the app runs every changed file.
   local after="Every changed file runs once you test, build or start the app on the host: read the whole

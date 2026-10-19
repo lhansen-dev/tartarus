@@ -83,6 +83,9 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
   git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json yarn.lock CLAUDE.md docs.md && git add -A && git commit -q -m risky
   git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
+  # A tag named main at the risky commit would make the review diff risky against itself.
+  git tag main risky && git tag sandbox-box/risky safe
+  git checkout -q -b escapes safe && touch "$(printf 'x\033[2K.mk')" && git add -A && git commit -q -m "$(printf 'a\033]0;t\007\302\233b')"
   cd ../host && git remote add sandbox-box ../agent
 ) >/dev/null
 review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
@@ -95,6 +98,11 @@ rc=0; out="$(review sneaky)" || rc=$?
 if [[ $rc != 2 || "$out" != *".VSCode/tasks.json"* || "$out" != *".vscode/tâsks.json"* || "$out" != *"eslint.config.mjs"* \
   || "$out" != *"notes (symlink)"* || "${out#*REVIEW BEFORE}" == *workspace* ]]; then
   echo "FAIL: review sneaky (exit $rc)"; echo "$out"; fails=1
+fi
+[[ -z "$(git -C "$TMP/host" tag)" ]] || { echo "FAIL: review fetched the agent's tags"; fails=1; }
+rc=0; out="$(review escapes)" || rc=$?
+if [[ $rc != 2 || "$out" == *$'\033'* || "$out" == *$'\007'* || "$out" == *$'\302\233'* || "$out" != *"x?[2K.mk"* ]]; then
+  echo "FAIL: review escapes (exit $rc)"; printf '%q\n' "$out"; fails=1
 fi
 
 ((fails)) && exit 1
