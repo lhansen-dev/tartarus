@@ -27,13 +27,30 @@ check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
 check "run claude ~/a ~/ab" "sbx $R claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
-check "setup" "sbx policy deny network *.prod.yourco.com"
+check "setup" "sbx daemon restart"
 
 : > "$TMP/log"; "$ROOT/bin/tartarus" setup >/dev/null
 for want in "sbx settings set ssh.agentForwardingEnabled false" "sbx settings set clipboard.imagePaste false" \
-  "sbx settings set skills.defaultMode off" "sbx policy reset --force" "sbx policy init deny-all"; do
+  "sbx settings set skills.defaultMode off" "sbx policy reset --force" "sbx policy init deny-all" \
+  "sbx policy deny network *.prod.yourco.com" "sbx daemon restart"; do
   grep -qxF "$want" "$TMP/log" || { echo "FAIL: setup missing: $want"; fails=1; }
 done
+
+# review: a local repo stands in for the sandbox's git remote.
+(
+  set -e; cd "$TMP"; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  git init -q -b main host && git -C host commit -q --allow-empty -m init
+  git clone -q host agent && cd agent
+  git checkout -q -b safe && echo hi > README.md && git add -A && git commit -q -m safe
+  git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json && git add -A && git commit -q -m risky
+  cd ../host && git remote add sandbox-box ../agent
+) >/dev/null
+review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
+out="$(review safe)" || { echo "FAIL: review safe exited $?"; fails=1; }
+rc=0; out="$(review risky)" || rc=$?
+if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "${out#*REVIEW BEFORE}" == *README* ]]; then
+  echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
+fi
 
 ((fails)) && exit 1
 echo "all tests passed"

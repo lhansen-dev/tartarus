@@ -23,7 +23,8 @@ usage() {
 Usage: tartarus <command> [args]
 
   setup                         Harden sbx on this machine: pinned settings, deny-all network policy.
-                                Resets the global network policy; per-sandbox kit rules are kept.
+                                Resets the global network policy (per-sandbox kit rules are kept)
+                                and restarts the sbx daemon, which stops running sandboxes.
   audit                         Check this machine's sbx settings, policy and secrets match setup
   login <harness>               Store the harness credential in the host keychain (never enters the VM)
   run <harness> [--name N] [--detach] [path...] [-- agent args]
@@ -31,6 +32,10 @@ Usage: tartarus <command> [args]
                                 First path is the repo the agent changes (default: .). Extra paths
                                 are mounted read-only; suffix one with :rw to make it writable.
   verify <sandbox-name>         Run audit, then the in-sandbox battery: secrets, host surfaces, egress
+  review <sandbox-name> <branch>
+                                Fetch the agent's branch to the host without checking it out, and flag
+                                changed files that run code on the host (hooks, CI, IDE tasks, builds).
+                                Exits 2 when any are found.
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
@@ -60,6 +65,8 @@ cmd_setup() {
   sbx policy reset --force
   sbx policy init deny-all
   deny_hosts | while read -r host; do sbx policy deny network "$host"; done
+  # ssh.* settings only reach the daemon after a restart; this stops running sandboxes.
+  sbx daemon restart
 }
 
 cmd_audit() {
@@ -134,6 +141,27 @@ cmd_run() {
   exec sbx "${args[@]}"
 }
 
+# Files that run code on the host when you build, test, open or commit: the trust-handoff path.
+RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.mcp\.json|\.envrc|\.npmrc|\.yarnrc|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|.*\.gradle|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|conftest\.py|tox\.ini|noxfile\.py|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules)'
+
+cmd_review() {
+  local name="${1:-}" branch="${2:-}"
+  [[ -n "$name" && -n "$branch" ]] || die "review needs a sandbox name and branch"
+  local remote="sandbox-$name" base
+  git fetch "$remote"
+  base="$(git rev-parse --abbrev-ref HEAD)"
+  git log --oneline "$base..$remote/$branch"
+  git diff --stat "$base...$remote/$branch"
+  local risky
+  risky="$(git diff --name-only "$base...$remote/$branch" | grep -E "$RISKY_PATHS" || true)"
+  if [[ -n "$risky" ]]; then
+    echo; echo "REVIEW BEFORE CHECKOUT, BUILD OR OPENING IN AN IDE (these run code on the host):"
+    printf '%s\n' "$risky" | sed 's/^/  /'
+    return 2
+  fi
+  echo; echo "No files that execute on the host changed. Still review the diff before merging."
+}
+
 host_ips() {
   if command -v ip >/dev/null; then
     ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1
@@ -172,6 +200,7 @@ case "${1:-}" in
   login) shift; cmd_login "$@" ;;
   run) shift; cmd_run "$@" ;;
   verify) shift; cmd_verify "$@" ;;
+  review) shift; cmd_review "$@" ;;
   safe) shift; cmd_safe "$@" ;;
   ""|-h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;
