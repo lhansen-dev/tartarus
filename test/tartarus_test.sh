@@ -48,7 +48,8 @@ DC="--deny-network mcp-proxy.anthropic.com --deny-network bridge.claudeuserconte
 DC+=" --deny-network downloads.claude.ai --deny-network claude.ai --deny-network console.anthropic.com"
 DC+=" --deny-network claude.com --deny-network code.claude.com"
 DX="--deny-network github.com --deny-network api.github.com --deny-network codeload.github.com"
-DXR="$DX"; DX+=" --deny-network registry.npmjs.org"
+DXO="--deny-network releases.openai.com --deny-network files.openai.com --deny-network openai.com"
+DXR="$DX $DXO"; DX+=" --deny-network registry.npmjs.org $DXO"
 check "run claude" "sbx $R $DC claude ."
 check "run codex --name xy --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
   "sbx $R $DX --name xy --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"

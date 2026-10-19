@@ -4,3 +4,6 @@ github.com            # agents don't push; humans do, from the host
 api.github.com
 codeload.github.com
 registry.npmjs.org    # the kit allows npm; registries are opt-in (TARTARUS_REGISTRIES=1 lifts this)
+releases.openai.com   # self-update downloads; keep the image's pinned binary
+files.openai.com      # file uploads to the account; Codex still works without (tested, sbx v0.48.0)
+openai.com            # website; not needed by the CLI
