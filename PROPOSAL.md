@@ -179,8 +179,11 @@ Fetching isn't approval. Before checking out, building, or opening the branch in
 - IDE and devcontainer config;
 - build and task files;
 - dependency manifests and lockfiles (a lockfile can point a package at any tarball URL without a manifest change);
-- environment managers such as `direnv`, `mise` and Nix;
-- harness config that runs commands (`.claude/`, `.codex/`, `.mcp.json`);
+- environment managers such as `direnv`, `mise` and Nix, toolchain pins (`rust-toolchain.toml` can name a toolchain path), and `.env` files, which can set `NODE_OPTIONS` or `LD_PRELOAD` for tools that load them;
+- JVM and .NET build wrappers and properties (`gradle-wrapper.properties` downloads and runs any Gradle, `Directory.Build.props` hooks every MSBuild);
+- infrastructure as code (`terraform plan` runs `external` data sources) and `ansible.cfg`;
+- editor and debugger startup files (`.dir-locals.el`, `.ycm_extra_conf.py`, `.pdbrc`, `.gdbinit`) and linter configs that load code (`.pylintrc` `init-hook`, `mypy.ini` plugins, `.babelrc`);
+- harness config that runs commands (`.claude/`, `.codex/`, `.mcp.json`, and the equivalents of a dozen other agents);
 - JS tool configs (`eslint.config.js`, `vite.config.ts`, `.prettierrc.js`), which IDEs and linters run on open, and Python startup hooks (`.pth`, `sitecustomize.py`);
 - agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`). These are prompt injection aimed at the next agent you run on the host, outside the sandbox;
 - every added or changed symlink, which can point a build or IDE at any host file.

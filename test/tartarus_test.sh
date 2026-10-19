@@ -110,6 +110,9 @@ grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: ver
   git clone -q host agent && cd agent
   git checkout -q -b safe && echo hi > README.md && git add -A && git commit -q -m safe
   git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json yarn.lock CLAUDE.md docs.md && git add -A && git commit -q -m risky
+  mkdir -p gradle/wrapper infra && touch rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties \
+    infra/main.tf .devcontainer.json CLAUDE.local.md mise.local.toml .env.local .pylintrc src/environment.ts src/props.md
+  git add -A && git commit -q -m more
   git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
   # A tag named main at the risky commit would make the review diff risky against itself.
@@ -123,6 +126,11 @@ rc=0; out="$(review risky)" || rc=$?
 if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "$out" != *"  yarn.lock"* || "$out" != *"  CLAUDE.md"* || "${out#*REVIEW BEFORE}" == *docs.md* || "${out#*REVIEW BEFORE}" == *README* ]]; then
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
 fi
+for f in rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties infra/main.tf .devcontainer.json \
+  CLAUDE.local.md mise.local.toml .env.local .pylintrc; do
+  [[ "$out" == *"  $f"* ]] || { echo "FAIL: review missed $f"; fails=1; }
+done
+[[ "${out#*REVIEW BEFORE}" != *environment.ts* && "${out#*REVIEW BEFORE}" != *props.md* ]] || { echo "FAIL: review flagged plain source"; fails=1; }
 rc=0; out="$(review sneaky)" || rc=$?
 if [[ $rc != 2 || "$out" != *".VSCode/tasks.json"* || "$out" != *".vscode/tâsks.json"* || "$out" != *"eslint.config.mjs"* \
   || "$out" != *"notes (symlink)"* || "${out#*REVIEW BEFORE}" == *workspace* ]]; then
