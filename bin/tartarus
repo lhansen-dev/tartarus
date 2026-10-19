@@ -455,11 +455,18 @@ Reviewed $tip. Take exactly that commit, not the branch, which moves on the next
 
 cmd_sign_kits() {
   if [[ ! -f "$SIGNING_KEY" ]]; then
+    # A new key only for a repo with none yet: replacing the team's would orphan every signature.
+    [[ ! -f "$REPO_PUB" ]] || die "no key at $SIGNING_KEY, and kits/signing.pub names the team's; get that key (TARTARUS_SIGNING_KEY)"
     mkdir -p "$(dirname "$SIGNING_KEY")"
     (umask 077 && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$SIGNING_KEY")
     openssl pkey -in "$SIGNING_KEY" -pubout -out "$REPO_PUB"
     echo "tartarus: new signing key $SIGNING_KEY; public key in kits/signing.pub"
   fi
+  python3 -c 'import os, sys; sys.exit(os.stat(sys.argv[1]).st_mode & 0o077 != 0)' "$SIGNING_KEY" \
+    || die "$SIGNING_KEY is readable by other users; chmod 600 it (and consider it leaked)"
+  # Signing with a key that isn't the team's would leave kits that setup and audit reject.
+  openssl pkey -in "$SIGNING_KEY" -pubout 2>/dev/null | cmp -s - "$REPO_PUB" \
+    || die "$SIGNING_KEY doesn't match kits/signing.pub; sign with the team key (TARTARUS_SIGNING_KEY)"
   local kit f
   for kit in "$ROOT"/kits/*/; do
     # Sign first: with kit.requireSignature on, validate refuses an edited kit until it's re-signed.

@@ -178,6 +178,14 @@ echo '*.evil.example' >> "$TMP/copy/policy/deny-claude.txt"
 copy() { TARTARUS_SIGNING_KEY="$TMP/test.key" XDG_CONFIG_HOME="$TMP/config2" "$TMP/copy/bin/tartarus" "$@"; }
 copy sign-kits >/dev/null && [[ -s "$TMP/copy/kits/signing.pub" ]] || { echo "FAIL: sign-kits made no key"; fails=1; }
 copy setup >/dev/null && copy audit >/dev/null || { echo "FAIL: audit after sign-kits and setup"; fails=1; }
+chmod 644 "$TMP/test.key"; copy sign-kits >/dev/null 2>&1 && { echo "FAIL: sign-kits used a world-readable key"; fails=1; }; chmod 600 "$TMP/test.key"
+cp "$TMP/copy/kits/signing.pub" "$TMP/team.pub"
+TARTARUS_SIGNING_KEY="$TMP/other.key" XDG_CONFIG_HOME="$TMP/config2" "$TMP/copy/bin/tartarus" sign-kits >/dev/null 2>&1 \
+  && { echo "FAIL: sign-kits without the team key went ahead"; fails=1; }
+cmp -s "$TMP/team.pub" "$TMP/copy/kits/signing.pub" || { echo "FAIL: sign-kits replaced the team's signing.pub"; fails=1; }
+(umask 077 && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$TMP/other.key" 2>/dev/null)
+TARTARUS_SIGNING_KEY="$TMP/other.key" XDG_CONFIG_HOME="$TMP/config2" "$TMP/copy/bin/tartarus" sign-kits >/dev/null 2>&1 \
+  && { echo "FAIL: sign-kits signed with a key that isn't kits/signing.pub"; fails=1; }
 # A wildcard deny reaches sbx as written, not globbed against files in the current directory.
 mkdir "$TMP/cwd" && touch "$TMP/cwd/a.evil.example"
 : > "$TMP/log"; (cd "$TMP/cwd" && copy run claude --name gl "$TMP/sec" >/dev/null 2>&1) || true
