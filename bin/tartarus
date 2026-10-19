@@ -415,7 +415,10 @@ review_branch() {
   # The agent runs the git server: check every object it sends (a tree entry named .git, a
   # hostile .gitmodules) before it lands, here and in any later git fetch --all of this repo.
   git config fetch.fsckObjects true
-  git fetch --no-tags --no-recurse-submodules "$remote"
+  # The agent decides how much it sends: cap it, as one pack (unpackLimit=1) of at most 4 GiB
+  # (ulimit -f counts KiB), rather than let a planted huge blob fill this disk.
+  (ulimit -f 4194304; git -c fetch.unpackLimit=1 fetch --no-tags --no-recurse-submodules "$remote") \
+    || die "fetching from $name failed (refused objects, or over 4 GiB?)"
   # Full refnames from here on: a short name like main can resolve to something else.
   local ref="refs/remotes/$remote/$branch" range
   git rev-parse --verify -q "$ref^{commit}" >/dev/null || {
