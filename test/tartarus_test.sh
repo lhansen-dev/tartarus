@@ -23,6 +23,7 @@ case "\$*" in
   "secret ls --quiet") [ -f "\$S/broken-secrets" ] && exit 1; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
+case "\$1" in exec) printf 'from the sandbox: \033]0;t\007\n' ;; esac
 EOF
 chmod +x "$TMP/sbx"
 export PATH="$TMP:$PATH" TARTARUS_BASELINE_KIT=KIT XDG_CONFIG_HOME="$TMP/config"
@@ -241,7 +242,8 @@ for spec in "$ROOT"/kits/*/spec.yaml; do
     yq -r ".setup.startup[$i].command[2]" "$spec" | sh -n || { echo "FAIL: $spec startup $i syntax"; fails=1; }
   done
 done
-: > "$TMP/log"; "$ROOT/bin/tartarus" verify box >/dev/null 2>&1 || true
+: > "$TMP/log"; out="$("$ROOT/bin/tartarus" verify box 2>&1 || true)"
+[[ "$out" == *"from the sandbox: ?]0;t?"* ]] || { echo "FAIL: verify output not sanitized"; printf '%q\n' "$out"; fails=1; }
 grep -q '^sbx cp' "$TMP/log" && { echo "FAIL: verify copied files into the sandbox"; fails=1; }
 grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: verify did not pass the deny list"; fails=1; }
 grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify requires registries blocked"; fails=1; }
