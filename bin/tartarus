@@ -44,6 +44,7 @@ EOF
 }
 
 die() { echo "tartarus: $*" >&2; exit 1; }
+indent() { while IFS= read -r line; do echo "          $line"; done <<<"$1"; }
 
 # Per-harness wiring. Agent names and defaults are sbx's own: copilot --yolo,
 # claude --dangerously-skip-permissions, codex --dangerously-bypass-approvals-and-sandbox.
@@ -91,7 +92,7 @@ print("\n".join(", ".join(r["resources"]) for r in rules
 import json, sys
 rules = json.load(sys.stdin).get("rules") or []
 print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if r["decision"] == "allow"))')"
-  [[ -z "$approved" ]] || { echo "  FAIL  allows created by approving prompts:"; printf '          %s\n' "$approved"; fail=1; }
+  [[ -z "$approved" ]] || { echo "  FAIL  allows created by approving prompts:"; indent "$approved"; fail=1; }
   local pending
   pending="$(sbx policy approval ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
   ((pending == 0)) || echo "  info  $pending pending approval prompt(s): dismiss them, don't allow (sbx policy approval ls)"
@@ -100,9 +101,13 @@ print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if 
     [[ -z "$host" ]] && continue
     sbx policy ls --json | grep -qF "\"$host\"" || { echo "  FAIL  deny rule missing: $host"; fail=1; }
   done < <(deny_hosts)
+  # Every sandbox reaches the MCP gateway (a daemon alias that deny rules don't cover), so any
+  # registered server is exposed to every agent; host stdio servers run commands on the host.
+  local mcp; mcp="$(sbx mcp ls 2>&1 || true)"
+  [[ "$mcp" == *"No MCP servers registered"* ]] || { echo "  FAIL  MCP servers registered (sbx mcp ls):"; indent "$mcp"; fail=1; }
   # A github secret would let the proxy push to github.com for the agent.
   if sbx secret ls --quiet | grep -qx github; then echo "  FAIL  'github' secret stored"; fail=1; fi
-  ((fail)) && { echo "audit: FAIL (run: tartarus setup)"; return 1; }
+  ((fail)) && { echo "audit: FAIL (settings and policy: tartarus setup; others: fix as listed)"; return 1; }
   echo "audit: OK (settings pinned, global policy deny-all, no github secret)"
 }
 
