@@ -481,20 +481,29 @@ cmd_dismiss() {
   echo "tartarus: dismissed $n approval prompt(s)"
 }
 
+# sbx rm leaves the fetched refs and the remote (with run's settings on it) in the host repo.
+drop_sandbox_refs() { # drop_sandbox_refs <repo> <name>
+  git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  git -C "$1" for-each-ref --format='%(refname)' "refs/sandboxes/$2/" | while read -r ref; do git -C "$1" update-ref -d "$ref"; done
+  git -C "$1" remote remove "sandbox-$2" 2>/dev/null || true
+  git -C "$1" config --remove-section "remote.sandbox-$2" 2>/dev/null || true
+}
+
 cmd_rm() {
-  local name
+  local name repo
   (($#)) || die "rm needs one or more sandbox names"
   for name in "$@"; do check_name "$name"; done
   # A removed sandbox's prompts can only ever be allowed by mistake.
   cmd_dismiss "$@"
   for name in "$@"; do
+    # Clean the sandbox's own repo, from sbx's record of its workspace, wherever rm runs from.
+    repo="$(sbx ls --json | python3 -c '
+import json, sys
+print(next((s["workspaces"][0] for s in json.load(sys.stdin) if s["name"] == sys.argv[1] and s.get("workspaces")), ""))' "$name" 2>/dev/null || true)"
     sbx rm --force "$name"
     rm -f "$CONFIG/sandboxes/$name"
-    # sbx rm leaves the fetched refs behind in the host repo.
-    if git rev-parse --git-dir >/dev/null 2>&1; then
-      git for-each-ref --format='%(refname)' "refs/sandboxes/$name/" | while read -r ref; do git update-ref -d "$ref"; done
-      git remote remove "sandbox-$name" 2>/dev/null || true
-    fi
+    [[ -n "$repo" ]] && drop_sandbox_refs "$repo" "$name"
+    drop_sandbox_refs . "$name"
   done
 }
 

@@ -19,6 +19,7 @@ case "\$*" in
   "kit verify "*) exit 0 ;;
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
   "ls --quiet") cat "\$S/sandboxes" 2>/dev/null; exit 0 ;;
+  "ls --json") cat "\$S/ls.json" 2>/dev/null || echo "[]"; exit 0 ;;
   "secret ls --quiet") [ -f "\$S/broken-secrets" ] && exit 1; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
@@ -88,6 +89,14 @@ printf 'APPROVAL SANDBOX TITLE\nnet:1 ab x.com:443 d\nnet:2 cd y.com:443 d\nnet:
 grep -q 'option allow' "$TMP/log" && { echo "FAIL: something allowed a prompt"; fails=1; }
 rm "$TMP/state/approvals"
 check "rm ab --all" ""                    # a flag as a name: refused before anything is removed
+# rm cleans the sandbox's own repo (sbx records its workspace), even when run from elsewhere.
+git init -q "$TMP/ws" && git -C "$TMP/ws" commit -q --allow-empty -m i && git -C "$TMP/ws" update-ref refs/sandboxes/wsbox/main HEAD
+git -C "$TMP/ws" remote add sandbox-wsbox git://127.0.0.1:1/x && git -C "$TMP/ws" config remote.sandbox-wsbox.tagOpt --no-tags
+echo "[{\"name\": \"wsbox\", \"workspaces\": [\"$TMP/ws\"]}]" > "$TMP/state/ls.json"
+(cd "$TMP" && "$ROOT/bin/tartarus" rm wsbox >/dev/null 2>&1)
+[[ -z "$(git -C "$TMP/ws" for-each-ref refs/sandboxes)" && -z "$(git -C "$TMP/ws" config --get-regexp '^remote\.sandbox-wsbox' || true)" ]] \
+  || { echo "FAIL: rm left the sandbox's refs or remote in its repo"; fails=1; }
+rm "$TMP/state/ls.json"
 check "run claude --name --kit ." ""
 : > "$TMP/log"; "$ROOT/bin/tartarus" verify -u >/dev/null 2>&1 || true
 grep -q 'exec' "$TMP/log" && { echo "FAIL: verify took a flag as a sandbox name"; fails=1; }
