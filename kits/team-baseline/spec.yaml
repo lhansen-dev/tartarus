@@ -1,20 +1,13 @@
 # Team defaults layered onto every tartarus sandbox, whatever the harness.
 # Validate with: sbx kit validate ./kits/team-baseline
 #
-# The global policy is deny-all (tartarus setup), so this allow list plus the
-# harness kit's own vendor endpoints is the sandbox's entire reachable internet.
-# Keep it short: every domain here is a possible exfiltration path.
+# The global policy is deny-all (tartarus setup), so the harness kit's own vendor
+# endpoints are the sandbox's entire reachable internet. This kit allows nothing more:
+# every domain is a possible exfiltration path. npm and PyPI are opt-in (kits/registries).
 schemaVersion: "2"
 kind: mixin
 name: team-baseline
 description: Team defaults for running AI coding agents in sbx
-
-permissions:
-  network:
-    allow:
-      - registry.npmjs.org
-      - pypi.org
-      - files.pythonhosted.org
 
 setup:
   startup:

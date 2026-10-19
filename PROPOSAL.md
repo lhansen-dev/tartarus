@@ -47,7 +47,7 @@ Every agent session runs in `sbx`, whatever the task and whatever the harness. T
 
 Adding another `sbx`-supported harness (Gemini, Cursor, OpenCode and others [30]) takes one `case` arm in `bin/tartarus` and a `policy/deny-<harness>.txt`.
 
-Claude Code and Codex have been tested end to end under the full lockdown. Copilot is wired the same way but not yet tested: no Copilot account was available. Its kit allows `github.com` and `api.github.com`, so check `sbx policy log` during the pilot and add a `policy/deny-copilot.txt` for anything it doesn't need.
+Claude Code and Codex have been tested end to end under the full lockdown. Copilot is wired the same way but not yet tested: no Copilot account was available. Its kit allows `github.com` and `api.github.com`, so check `sbx policy log` during the pilot and add anything it doesn't need to `policy/deny-copilot.txt` (empty for now).
 
 ### VS Code
 
@@ -78,7 +78,7 @@ The network policy must allow Microsoft's VS Code download domains and the harne
 | What's isolated | Most commands the agent runs; the agent runs on the host [1] | Everything, including the agent |
 | What the agent sees | Your real filesystem, minus the policy | Only the mounted project folder |
 | Credentials | Git and GitHub credentials passed through by default [1] | Held on the host and added by a proxy; never enter the VM [8], [22] |
-| Network | Configurable | Host-side proxy. Tartarus sets `deny-all`, so each sandbox reaches only its harness vendor's API plus npm and PyPI. Raw TCP, UDP and ICMP are blocked, as are private IP ranges, loopback and link-local addresses [17] |
+| Network | Configurable | Host-side proxy. Tartarus sets `deny-all`, so each sandbox reaches only its harness vendor's API (plus npm and PyPI when opted in). Raw TCP, UDP and ICMP are blocked, as are private IP ranges, loopback and link-local addresses [17] |
 | Escape hatch | Can request to run one command outside [1] | None built in |
 | Same model for every harness | No, each harness has its own | Yes |
 | Requirements | Built into the harness, free | macOS Tahoe 26+ on Macs; Docker Desktop not required [6], [10] |
@@ -90,7 +90,7 @@ In short: a harness sandbox is a fence inside your house, and `sbx` is a separat
 Setup is four commands per machine, plus the `tartarus` repo the team maintains in git:
 - `bin/tartarus`: the launcher;
 - `kits/`: the signed shared kits;
-- `policy/`: prod hostnames and per-harness deny lists.
+- `policy/`: prod hostnames and per-harness deny lists, signed like the kits.
 
 1. **Install `sbx` and sign in** [4]:
    - macOS: `brew install docker/tap/sbx`
@@ -109,8 +109,8 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
    ```
 
    - **SSH forwarding:** it's on by default [22], and with 1Password's SSH agent it would hand the sandbox every key we hold. If a team needs signed agent commits, run an isolated SSH agent loaded only with an agent-only key [25], or use Docker's signing kit [26].
-   - **Network:** under `deny-all`, the global policy allows nothing. Each sandbox gets only its harness kit's vendor endpoints plus the baseline kit's npm and PyPI [9], [11]. Private IP ranges, loopback and link-local addresses are blocked regardless [17]. `policy/deny.txt` is for prod endpoints with public addresses, such as public APIs and cloud control planes.
-   - **Kits:** only kits signed by the team key, plus Docker's own, can be installed. Kits run code inside the sandbox [8].
+   - **Network:** under `deny-all`, the global policy allows nothing. Each sandbox gets only its harness kit's vendor endpoints [9], [11]. npm and PyPI are opt-in per run with `TARTARUS_REGISTRIES=1` (`kits/registries`). Private IP ranges, loopback and link-local addresses are blocked regardless [17]. `policy/deny.txt` is for prod endpoints with public addresses, such as public APIs and cloud control planes.
+   - **Kits and policy:** only kits signed by the team key, plus Docker's own, can be installed. Kits run code inside the sandbox [8]. The `policy/` deny lists are signed with the same key: `setup`, `run`, `verify` and `audit` refuse a list that is edited, unsigned or missing. `setup` also refuses a `kits/signing.pub` that changed since the last setup until you re-run it with `TARTARUS_REPIN=1`, so swapping the key (and re-signing everything) is never silent.
 
    `tartarus audit` checks all of this at any time, including that no extra kit signer or kit source was added since setup, and `tartarus verify` runs it automatically.
 3. **Give the sandbox only the model credential:** `tartarus login <harness>`.
@@ -151,10 +151,11 @@ Extra paths are mounted at the same location as on the host [23]. Clone mode onl
 ### The shared kits
 
 A kit is a `spec.yaml` that adds tools, credentials, network rules, and files to a sandbox at runtime [8], [12]. Both kits are mixins, so they layer onto any harness:
-- **`kits/team-baseline`:** the team's network allowlist (npm and PyPI). It also removes the in-VM end of the host clipboard bridge.
+- **`kits/team-baseline`:** allows no extra network; removes the in-VM end of the host clipboard bridge.
+- **`kits/registries`:** npm and PyPI, added only with `TARTARUS_REGISTRIES=1`. Off by default because a registry is both an upload channel and a supply-chain path. Without it the agent can't install new packages, so it can't test against a typosquat it added.
 - **`kits/no-root`:** removes the agent's passwordless `sudo` and locks the Docker socket to root. `TARTARUS_ALLOW_ROOT=1` opts out.
 
-After any kit change, run `tartarus sign-kits`. It validates and signs every kit with the team key, which it creates on first use under `~/.config/tartarus/`, outside the repo. Then commit `kits/signing.pub` and the `kit.sig.bundle` files. If a kit changes without being re-signed, `sbx` refuses to install it and `audit` reports it.
+After any kit or policy change, run `tartarus sign-kits`. It signs and validates every kit, and signs every `policy/*.txt`, with the team key, which it creates on first use under `~/.config/tartarus/`, outside the repo. Then commit `kits/signing.pub`, the `kit.sig.bundle` files and `policy/*.sig`. Protect `kits/` and `policy/` with CODEOWNERS so a signature change needs a second reviewer. If a kit changes without being re-signed, `sbx` refuses to install it and `audit` reports it.
 
 Teams can also point `TARTARUS_BASELINE_KIT` at a pinned git copy (`git+https://github.com/yourorg/tartarus.git#ref=v1&dir=kits/team-baseline`) and add that source to `TARTARUS_KIT_SOURCES` [8]. Put shared config under `files/home/`, not `files/workspace/`, because kit files overwrite existing files and the workspace is the person's repo [8].
 
@@ -175,7 +176,7 @@ Fetching isn't approval. Before checking out, building, or opening the branch in
 - CI configuration;
 - IDE and devcontainer config;
 - build and task files;
-- dependency manifests;
+- dependency manifests and lockfiles (a lockfile can point a package at any tarball URL without a manifest change);
 - environment managers such as `direnv`, `mise` and Nix;
 - harness config that runs commands (`.claude/`, `.codex/`, `.mcp.json`);
 - JS tool configs (`eslint.config.js`, `vite.config.ts`, `.prettierrc.js`), which IDEs and linters run on open, and Python startup hooks (`.pth`, `sitecustomize.py`);
@@ -183,6 +184,8 @@ Fetching isn't approval. Before checking out, building, or opening the branch in
 - every added or changed symlink, which can point a build or IDE at any host file.
 
 Matching is case-insensitive (macOS opens `.VSCode/` as `.vscode/`), and both ends of a rename are checked.
+
+The list only covers files that run on their own. Running tests, a build or the app on the host runs every changed file, so a backdoor in `src/` imported by a test runs too. `review` says so on every run. Read the whole diff before running anything on the host, or run tests inside the sandbox (`sbx exec -it <name> bash`).
 
 Then push the branch to our server as usual.
 
@@ -252,7 +255,12 @@ Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 with Claude Cod
 | The vendor API is an open channel | The agent must reach its own model API, and with OAuth it acts as you there (for example, Codex reaches `chatgpt.com`) | Inherent to running the agent at all. Deny everything else (done), and prefer API keys scoped to a team project over personal subscriptions |
 | Persistent sandboxes | A sandbox, including anything a compromised agent planted in its home, persists across sessions for the same repo and lockdown | `tartarus rm` after merging work; a fresh sandbox per task for untrusted inputs |
 | Public prod endpoints | Private ranges are blocked [17], but public prod APIs and cloud control planes are reachable if a rule allows them | `policy/deny.txt`; review `sbx policy log` |
-| Allowlist creep | Every domain added to the kits, and every approved prompt, is a possible exfiltration path [16]. Even the npm registry is one: `npm publish` with a token an attacker plants in a prompt uploads to it | Keep `team-baseline` short. `audit` fails on approval-created allows. Drop `registry.npmjs.org` from the kit for repos that don't need it |
+| Allowlist creep | Every domain added to the kits, and every approved prompt, is a possible exfiltration path [16]. Even the npm registry is one: `npm publish` with a token an attacker plants in a prompt uploads to it | `team-baseline` allows nothing; npm and PyPI are opt-in per run (`TARTARUS_REGISTRIES=1`). `audit` fails on approval-created allows |
+| Supply chain | With registries on, the agent can add a typosquatted or malicious package | Registries off by default; `review` flags manifests and lockfiles; check new package names by hand |
+| Code that passes review | Tartarus protects the session, not the code it produces. A logic bug, a weakened auth check or a quiet backdoor in an ordinary file runs once you test or ship it | Human review of the whole diff, branch protection, CI. `review` warns that running anything on the host runs every changed file |
+| Prompt injection | A poisoned README, issue or dependency can steer the agent. Inside the sandbox it can still rewrite the code however it likes | Tartarus limits what a hijacked agent can reach, not what it does to the code. Fresh sandbox per task for untrusted input (`tartarus rm`, or a new `--name`) |
+| Unsigned or swapped policy | An edited `policy/` file would loosen blocks on the next `setup`; a swapped `signing.pub` would let re-signed kits in | Policy is signed and checked in `setup`, `run`, `verify` and `audit`; a changed key needs `TARTARUS_REPIN=1`; CODEOWNERS on `kits/` and `policy/` |
+| VM escape | Everything rests on the `sbx` microVM and its proxy; a hypervisor or proxy bug would bypass every layer above | Out of scope for tartarus. No root for the agent removes the usual first step; keep `sbx` updated |
 | Credentials passed in | Anything we give the sandbox is usable inside it | One model credential per harness; SSH forwarding off; no `github` secret (audited); no global registry secrets |
 | CI as a path to prod | A pushed branch may trigger deploys or expose prod secrets | Branch protection and a CI trigger audit (see Git workflow) |
 | Harness drift | Three harnesses change their flags, auth and defaults independently | Rely on `sbx`'s own per-agent defaults; Tartarus only picks the credential and kit |

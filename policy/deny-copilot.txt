@@ -1,0 +1,2 @@
+# Hosts the Copilot kit allows that tartarus closes per sandbox (sbx run --deny-network).
+# None yet; the file exists so its signature can be checked like the others.

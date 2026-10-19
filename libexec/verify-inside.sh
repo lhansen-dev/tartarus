@@ -55,8 +55,16 @@ if [ -d /run/sandbox/source ]; then
 fi
 
 echo "egress"
-[ "$(http https://registry.npmjs.org/)" = 200 ] && pass "allowed host reachable (proxy works)" \
-  || echo "  warn  registry.npmjs.org unreachable; deny results below may be false passes"
+# The harness's own model API is the one host every sandbox may reach; any HTTP answer will do.
+reached=""
+for url in https://api.anthropic.com/ https://api.openai.com/ https://api.githubcopilot.com/; do
+  case "$(http "$url")" in 000|403) ;; *) reached="$url"; break ;; esac
+done
+[ -n "$reached" ] && pass "allowed host reachable (proxy works: $reached)" \
+  || echo "  warn  no model API reachable; deny results below may be false passes"
+# npm and PyPI are opt-in (TARTARUS_REGISTRIES=1); report which way this sandbox went.
+case "$(http https://registry.npmjs.org/)" in 000|403) pass "package registries blocked" ;;
+  *) echo "  info  npm reachable (sandbox started with TARTARUS_REGISTRIES=1?)" ;; esac
 [ "$(tcp gateway.docker.internal 3128)" = open ] && pass "TCP probe detects an open port (proxy)" \
   || echo "  warn  TCP probe can't see the proxy; direct TCP results below may be false passes"
 for url in https://example.com http://example.com https://s3.amazonaws.com https://storage.googleapis.com \

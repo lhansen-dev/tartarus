@@ -1,0 +1,15 @@
+# Opt-in package registries: npm and PyPI. Off by default because a registry is also an
+# upload channel (npm publish, twine upload with a token planted in a prompt) and a
+# supply-chain path (typosquats). Enable per run with TARTARUS_REGISTRIES=1.
+# Validate with: sbx kit validate ./kits/registries
+schemaVersion: "2"
+kind: mixin
+name: registries
+description: Allow npm and PyPI from the sandbox
+
+permissions:
+  network:
+    allow:
+      - registry.npmjs.org
+      - pypi.org
+      - files.pythonhosted.org

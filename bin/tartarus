@@ -46,14 +46,15 @@ Usage: tartarus <command> [args]
                                 Fetch the agent's branch to the host without checking it out, and flag
                                 changed files that run code on the host (hooks, CI, IDE tasks, builds).
                                 Exits 2 when any are found.
-  sign-kits                     Sign kits/*/ with the team key (made on first use, kept outside the
-                                repo); commit kits/signing.pub and the kit.sig.bundle files
+  sign-kits                     Sign kits/*/ and policy/*.txt with the team key (made on first use, kept
+                                outside the repo); commit kits/signing.pub and the signature files
   rm <sandbox-name>...          Remove sandboxes and the refs/sandboxes/<name>/* refs sbx keeps in
                                 this repo. Branch anything you want first: git branch X sandbox-<name>/Y
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
-Env: TARTARUS_SIGNING_KEY, TARTARUS_ALLOW_ROOT=1 (keep sudo/Docker for the agent), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
+Env: TARTARUS_SIGNING_KEY, TARTARUS_ALLOW_ROOT=1 (keep sudo/Docker for the agent), TARTARUS_REGISTRIES=1
+     (allow npm and PyPI), TARTARUS_REPIN=1 (trust a changed kits/signing.pub), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
 EOF
 }
 
@@ -75,8 +76,27 @@ harness_kit() {
 hosts_in() { [[ -f "$1" ]] && sed -e 's/#.*//' -e 's/[[:space:]]//g' "$1" | grep -v '^$' || true; }
 deny_hosts() { hosts_in "$DENY_FILE"; }
 
+# Policy files are signed like kits: an edited deny list would quietly loosen every sandbox.
+# A missing file or signature fails too, so deleting a list can't open it up. No key, no check.
+check_policy() { # check_policy <public key> <file>...
+  [[ -f "$1" ]] || return 0
+  local key="$1" f; shift
+  for f; do
+    [[ -f "$f" && -f "$f.sig" ]] && openssl dgst -sha256 -verify "$key" -signature "$f.sig" "$f" >/dev/null 2>&1 \
+      || die "$f: signature missing or stale (tartarus sign-kits)"
+  done
+}
+policy_files() { local f; echo "$DENY_FILE"; for f in "$ROOT"/policy/deny-*.txt; do echo "$f"; done; }
+
 cmd_setup() {
   local kv
+  # setup trusts whatever kits/signing.pub says, so a swapped key (with re-signed kits and
+  # policy) would otherwise be trusted silently on the next run. Make that a deliberate step.
+  if [[ -f "$PINNED_PUB" && -f "$REPO_PUB" && "${TARTARUS_REPIN:-}" != 1 ]] && ! cmp -s "$REPO_PUB" "$PINNED_PUB"; then
+    die "kits/signing.pub changed since the last setup; check who changed it (git log kits/signing.pub), then TARTARUS_REPIN=1 tartarus setup"
+  fi
+  local policy; mapfile -t policy < <(policy_files)
+  check_policy "$REPO_PUB" "${policy[@]}"
   for kv in "${SETTINGS[@]}"; do sbx settings set "${kv%%=*}" "${kv#*=}"; done
   sbx settings set kit.allowedSources "$KIT_SOURCES"
   # Rebuild the global policy from scratch so stale allows can't survive a re-run.
@@ -148,6 +168,10 @@ print("\n".join(h for h in sys.argv[1:] if h not in denied))' "${hosts[@]}" <<<"
       sbx kit verify --key "$PINNED_PUB" "$kit" >/dev/null 2>&1 \
         || { echo "  FAIL  $(basename "$kit") kit signature missing or stale (tartarus sign-kits)"; fail=1; }
     done
+    local f
+    while read -r f; do
+      (check_policy "$PINNED_PUB" "$f") 2>/dev/null || { echo "  FAIL  $f signature missing or stale (tartarus sign-kits)"; fail=1; }
+    done < <(policy_files)
   fi
   # Every sandbox reaches the MCP gateway (a daemon alias that deny rules don't cover), so any
   # registered server is exposed to every agent; host stdio servers run commands on the host.
@@ -177,7 +201,9 @@ cmd_run() {
   local kit; kit="$(harness_kit "$harness")"
   local args=(run --clone --skills off --cpus "$CPUS" --memory "$MEMORY" --kit "$BASELINE_KIT")
   [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] || args+=(--kit "$ROOT/kits/no-root")
+  [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && args+=(--kit "$ROOT/kits/registries")
   [[ -n "$kit" ]] && args+=(--kit "$kit")
+  check_policy "$PINNED_PUB" "$ROOT/policy/deny-$harness.txt"
   local host
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
   while read -r host; do args+=(--deny-network "$host"); done < <(hosts_in "$ROOT/policy/deny-$harness.txt")
@@ -202,7 +228,7 @@ cmd_run() {
     local fp
     # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
     fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/no-root/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
-      echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-}"; } | cksum | cut -d' ' -f1)"
+      echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-} ${TARTARUS_REGISTRIES:-}"; } | cksum | cut -d' ' -f1)"
     args+=(--name "tartarus-$harness-$(basename "$primary")-$fp")
   fi
   # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.
@@ -228,8 +254,9 @@ cmd_run() {
 # Files that run code on the host when you build, test, open or commit: the trust-handoff path.
 # Agent instruction files are included: text an agent plants there steers the next agent you
 # run on the host, outside the sandbox. Dependency manifests run code when installed. JS tool
-# configs (eslint, vite, jest...) are code that IDEs and linters load on open.
-RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.buildkite/|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.cursor/|\.mcp\.json|CLAUDE\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.envrc|\.direnv/|mise\.toml|\.mise\.toml|\.tool-versions|flake\.nix|shell\.nix|default\.nix|\.npmrc|\.yarnrc|\.pnpmfile|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|.*\.gradle(\.kts)?$|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|requirements.*\.txt|Pipfile|conftest\.py|tox\.ini|noxfile\.py|Gemfile|.*\.gemspec$|Rakefile|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules|\.lfsconfig|\.cargo/|\.yarn/|bunfig\.toml|deno\.jsonc?$|\.bazelrc|BUILD(\.bazel)?$|WORKSPACE(\.bazel)?$|MODULE\.bazel|meson\.build|configure(\.ac)?$|pytest\.ini|sitecustomize\.py|usercustomize\.py|.*\.pth$|.*\.config\.[cm]?[jt]s$|\.[a-z]+rc\.[cm]?js$|\.zed/|\.gemini/|\.aider|\.continue/|\.windsurf/|\.clinerules|\.exrc|\.nvimrc|\.nvim\.lua|.*\.code-workspace$)'
+# configs (eslint, vite, jest...) are code that IDEs and linters load on open. Lockfiles can
+# point a package at any tarball URL without a manifest change.
+RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.buildkite/|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.cursor/|\.mcp\.json|CLAUDE\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.envrc|\.direnv/|mise\.toml|\.mise\.toml|\.tool-versions|flake\.nix|shell\.nix|default\.nix|\.npmrc|\.yarnrc|\.pnpmfile|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|poetry\.lock|uv\.lock|Pipfile\.lock|pdm\.lock|Cargo\.lock|go\.sum|Gemfile\.lock|composer\.(json|lock)|.*\.gradle(\.kts)?$|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|requirements.*\.txt|Pipfile|conftest\.py|tox\.ini|noxfile\.py|Gemfile|.*\.gemspec$|Rakefile|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules|\.lfsconfig|\.cargo/|\.yarn/|bunfig\.toml|deno\.jsonc?$|\.bazelrc|BUILD(\.bazel)?$|WORKSPACE(\.bazel)?$|MODULE\.bazel|meson\.build|configure(\.ac)?$|pytest\.ini|sitecustomize\.py|usercustomize\.py|.*\.pth$|.*\.config\.[cm]?[jt]s$|\.[a-z]+rc\.[cm]?js$|\.zed/|\.gemini/|\.aider|\.continue/|\.windsurf/|\.clinerules|\.exrc|\.nvimrc|\.nvim\.lua|.*\.code-workspace$)'
 
 cmd_review() {
   local name="${1:-}" branch="${2:-}"
@@ -251,12 +278,16 @@ cmd_review() {
   # A symlink can point a build or IDE at any host file once checked out.
   links="$(git diff --no-renames --raw "$base...$remote/$branch" | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"}')"
   risky="$(printf '%s\n%s' "$risky" "$links" | sed '/^$/d')"
+  # The list only covers files that run on their own. Running tests or the app runs every changed file.
+  local after="Every changed file runs once you test, build or start the app on the host: read the whole
+diff first, or run them in the sandbox (sbx exec -it $name bash)."
   if [[ -n "$risky" ]]; then
     echo; echo "REVIEW BEFORE CHECKOUT, BUILD OR OPENING IN AN IDE (these run code on the host):"
     printf '%s\n' "$risky" | sed 's/^/  /'
+    echo; echo "$after"
     return 2
   fi
-  echo; echo "No files that execute on the host changed. Still review the diff before merging."
+  echo; echo "No files that run on their own changed. $after"
 }
 
 cmd_sign_kits() {
@@ -266,32 +297,35 @@ cmd_sign_kits() {
     openssl pkey -in "$SIGNING_KEY" -pubout -out "$REPO_PUB"
     echo "tartarus: new signing key $SIGNING_KEY; public key in kits/signing.pub"
   fi
-  local kit
+  local kit f
   for kit in "$ROOT"/kits/*/; do
-    sbx kit validate "$kit" && sbx kit sign --key "$SIGNING_KEY" "$kit"
+    # Sign first: with kit.requireSignature on, validate refuses an edited kit until it's re-signed.
+    { sbx kit sign --key "$SIGNING_KEY" "$kit" && sbx kit validate "$kit"; } || die "signing $kit failed"
   done
-  echo "tartarus: commit kits/signing.pub and kits/*/kit.sig.bundle, then run tartarus setup"
+  for f in "$ROOT"/policy/*.txt; do openssl dgst -sha256 -sign "$SIGNING_KEY" -out "$f.sig" "$f"; done
+  echo "tartarus: commit kits/signing.pub, kits/*/kit.sig.bundle and policy/*.sig, then run tartarus setup"
 }
 
 # Read-only: where each setting lives and what it is now.
 cmd_config() {
   local f
-  list() { paste -sd, - | sed 's/,/, /g'; }
+  list() { local l; l="$(paste -sd, - | sed 's/,/, /g')"; echo "${l:-(none)}"; }
   # Works with both yq flavours (Python/jq and Go); config is only a viewer, so yq stays optional.
   allows() { command -v yq >/dev/null || { echo "(install yq to list)"; return; }
     yq -r '(.permissions.network.allow // [])[]' "$1/spec.yaml" 2>/dev/null; }
   echo "Baseline kit  $BASELINE_KIT  ($( [[ -f "$BASELINE_KIT/kit.sig.bundle" ]] && echo "has kit.sig.bundle" || echo unsigned))  TARTARUS_BASELINE_KIT"
   echo "  allow       $(allows "$BASELINE_KIT" | list)"
+  echo "Registries    $( [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && echo "allowed: $(allows "$ROOT/kits/registries" | list)" || echo "blocked")  TARTARUS_REGISTRIES=1 allows npm and PyPI"
   echo "Deny (global) $DENY_FILE: $(hosts_in "$DENY_FILE" | list)  TARTARUS_DENY_FILE"
   for f in "$ROOT"/policy/deny-*.txt; do
-    printf '%-14s%s\n' "Deny ($(basename "$f" .txt | sed 's/^deny-//'))" "$(hosts_in "$f" | list)"
+    printf '%-13s %s\n' "Deny ($(basename "$f" .txt | sed 's/^deny-//'))" "$(hosts_in "$f" | list)"
   done
   echo "Resources     cpus=$CPUS memory=$MEMORY  TARTARUS_CPUS / TARTARUS_MEMORY"
   echo "Root          $( [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] && echo kept || echo "dropped (kits/no-root)")  TARTARUS_ALLOW_ROOT=1 keeps it"
   echo "Kit sources   $KIT_SOURCES  TARTARUS_KIT_SOURCES"
   echo "Signing key   $SIGNING_KEY  TARTARUS_SIGNING_KEY"
   echo "Pinned        ${SETTINGS[*]}  (edit SETTINGS in bin/tartarus)"
-  echo "Change policy or settings, then: tartarus setup. Change a kit, then: tartarus sign-kits."
+  echo "Change a kit or policy file, then: tartarus sign-kits. Change policy or settings, then: tartarus setup."
 }
 
 cmd_rm() {
@@ -319,6 +353,8 @@ cmd_verify() {
   local name="${1:-}"; [[ -n "$name" ]] || die "verify needs a sandbox name"
   local fail=0 ips
   cmd_audit || fail=1
+  local policy; mapfile -t policy < <(policy_files)
+  check_policy "$PINNED_PUB" "${policy[@]}"
   mapfile -t ips < <(host_ips)
   sbx cp "$ROOT/libexec/verify-inside.sh" "$name:/tmp/tartarus-verify.sh" >/dev/null
   # Every denied host must be blocked in any sandbox (wildcards can't be requested directly).

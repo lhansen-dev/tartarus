@@ -24,6 +24,7 @@ check "run claude" "sbx $R $DC claude ."
 check "run codex --name x --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
   "sbx $R $DX --name x --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
 check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit:latest copilot ."
+export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."; unset TARTARUS_REGISTRIES
 check "run gemini" ""
 check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
 check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
@@ -46,8 +47,24 @@ grep -qF "sbx settings set kit.trustedSigners [{\"key\": \"$TMP/config/tartarus/
   || { echo "FAIL: setup did not trust the pinned key"; fails=1; }
 
 out="$(TARTARUS_CPUS=2 TARTARUS_BASELINE_KIT="$ROOT/kits/team-baseline" "$ROOT/bin/tartarus" config)"
-[[ "$out" == *"allow       registry.npmjs.org, pypi.org, files.pythonhosted.org"* && "$out" == *"Deny (codex)  github.com,"* \
+[[ "$out" == *"allow       (none)"* && "$out" == *"Registries    blocked"* && "$out" == *"Deny (codex)  github.com,"* \
   && "$out" == *"cpus=2 memory=8g"* ]] || { echo "FAIL: config"; echo "$out"; fails=1; }
+out="$(TARTARUS_REGISTRIES=1 "$ROOT/bin/tartarus" config)"
+[[ "$out" == *"allowed: registry.npmjs.org, pypi.org, files.pythonhosted.org"* ]] || { echo "FAIL: config registries"; echo "$out"; fails=1; }
+
+# Signed policy: setup refuses an unsigned deny list before touching sbx, and a changed signing key.
+: > "$TMP/log"; echo evil.example > "$TMP/deny.txt"
+TARTARUS_DENY_FILE="$TMP/deny.txt" "$ROOT/bin/tartarus" setup >/dev/null 2>&1 && { echo "FAIL: setup took unsigned deny list"; fails=1; }
+[[ ! -s "$TMP/log" ]] || { echo "FAIL: setup changed sbx before refusing"; fails=1; }
+cp "$TMP/config/tartarus/kit-signing.pub" "$TMP/pinned"; echo other > "$TMP/config/tartarus/kit-signing.pub"
+"$ROOT/bin/tartarus" setup >/dev/null 2>&1 && { echo "FAIL: setup trusted a changed signing.pub"; fails=1; }
+TARTARUS_REPIN=1 "$ROOT/bin/tartarus" setup >/dev/null 2>&1 || { echo "FAIL: TARTARUS_REPIN=1 setup"; fails=1; }
+cmp -s "$TMP/pinned" "$TMP/config/tartarus/kit-signing.pub" || { echo "FAIL: repin did not pin the repo key"; fails=1; }
+# run checks the harness deny list against the pinned key (a wrong key stands in for a tampered list).
+check "run claude" "sbx $R $DC claude ."
+cp "$ROOT/kits/no-root/spec.yaml" "$TMP/config/tartarus/kit-signing.pub" 2>/dev/null
+check "run claude" ""
+cp "$TMP/pinned" "$TMP/config/tartarus/kit-signing.pub"
 
 # Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
 name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true
@@ -63,7 +80,7 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
   git init -q -b main host && git -C host commit -q --allow-empty -m init
   git clone -q host agent && cd agent
   git checkout -q -b safe && echo hi > README.md && git add -A && git commit -q -m safe
-  git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json CLAUDE.md docs.md && git add -A && git commit -q -m risky
+  git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json yarn.lock CLAUDE.md docs.md && git add -A && git commit -q -m risky
   git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
   cd ../host && git remote add sandbox-box ../agent
@@ -71,7 +88,7 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
 out="$(review safe)" || { echo "FAIL: review safe exited $?"; fails=1; }
 rc=0; out="$(review risky)" || rc=$?
-if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "$out" != *"  CLAUDE.md"* || "${out#*REVIEW BEFORE}" == *docs.md* || "${out#*REVIEW BEFORE}" == *README* ]]; then
+if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "$out" != *"  yarn.lock"* || "$out" != *"  CLAUDE.md"* || "${out#*REVIEW BEFORE}" == *docs.md* || "${out#*REVIEW BEFORE}" == *README* ]]; then
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
 fi
 rc=0; out="$(review sneaky)" || rc=$?
