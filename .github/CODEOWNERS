@@ -1,0 +1,8 @@
+# Everything here decides what a sandbox can reach or run. With branch protection's "require
+# review from Code Owners", a change to any of it needs the owner's approval; add a second
+# owner (or a team) so no one approves their own lockdown change.
+/bin/            @lhansen-dev
+/libexec/        @lhansen-dev
+/kits/           @lhansen-dev
+/policy/         @lhansen-dev
+/.github/        @lhansen-dev
