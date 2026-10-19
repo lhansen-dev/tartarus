@@ -68,6 +68,9 @@ for url in https://api.anthropic.com/ https://api.openai.com/ https://api.github
 done
 [ -n "$reached" ] && pass "allowed host reachable (proxy works: $reached)" \
   || echo "  warn  no model API reachable; deny results below may be false passes"
+# Domain fronting: an allowed host's connection carrying a blocked host's name must not get its page.
+if [ -n "$reached" ] && curl -q -s -m 8 -H 'Host: example.com' "$reached" 2>/dev/null | grep -q 'Example Domain'; then
+  bad "domain fronting: example.com reached via $reached"; else pass "no domain fronting via the allowed host"; fi
 # npm and PyPI are opt-in (TARTARUS_REGISTRIES=1); report which way this sandbox went.
 case "$(http https://registry.npmjs.org/)" in 000|403) pass "package registries blocked" ;;
   *) echo "  info  npm reachable (sandbox started with TARTARUS_REGISTRIES=1?)" ;; esac
