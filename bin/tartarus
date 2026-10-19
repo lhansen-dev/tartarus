@@ -35,6 +35,13 @@ SETTINGS=(
   kit.ignoreTransparencyLog=false   # keyless kit signatures must be in the transparency log
   tls.allowNegativeSerial=false     # no relaxed certificate checks on the proxy
   diagnostics.autoUpload=no         # error bundles hold logs and paths; never upload them
+  kit.allowExtractedAgents=false    # sbx's own refs for former built-in agents would skip signature checks
+  mcp.forceLocalGateway=true        # never Docker's SaaS MCP gateway, whose catalog isn't our empty one
+  'model.providers={}'              # no extra inference endpoints for sandboxes
+  no_proxy=                         # a host listed here skips the policy proxy
+  no_proxy.sandbox=
+  platform.images.registryMirror=   # a mirror is reachable from inside sandboxes too
+  'feature.udp-egress={"enabled":false,"variant":"","variantPayload":""}'  # UDP doesn't go through the proxy
 )
 
 usage() {

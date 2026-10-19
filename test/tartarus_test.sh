@@ -150,6 +150,8 @@ D='{"scope": "global", "resource_type": "network", "decision": "deny", "resource
 echo "{\"rules\": [$D, {\"scope\": \"sandbox:ab\", \"resource_type\": \"network\", \"decision\": \"allow\", \"resources\": [\"pastebin.com\"], \"provenance\": {\"created_via\": \"added\"}}]}" > "$TMP/state/policy"
 check "run claude" ""
 sed -i 's/"added"/"provisioned"/' "$TMP/state/policy"; check "run claude" "sbx $R $DC claude ."; rm "$TMP/state/policy"
+# A no_proxy entry would let traffic skip the policy proxy: drift there fails audit too.
+echo 10.0.0.0/8 > "$TMP/state/no_proxy.sandbox"; check "run claude" ""; : > "$TMP/state/no_proxy.sandbox"
 # sbx failing to answer fails audit, rather than reading as "nothing wrong" (audit runs with set -e off).
 echo '{"rules": [{"scope": "sandbox:ab", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/approved"
 check "run claude" ""; rm "$TMP/state/approved"
