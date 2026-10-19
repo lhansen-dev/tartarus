@@ -176,6 +176,12 @@ mkdir "$TMP/copy" && cp -r "$ROOT/bin" "$ROOT/kits" "$ROOT/policy" "$ROOT/libexe
 "$TMP/copy/bin/tartarus" setup >/dev/null 2>&1 && { echo "FAIL: setup accepted a deleted signing.pub"; fails=1; }
 : > "$TMP/log"; "$TMP/copy/bin/tartarus" run claude >/dev/null 2>&1 || true; [[ ! -s "$TMP/log" ]] || { echo "FAIL: run with signing.pub deleted"; fails=1; }
 "$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit after the copy tests"; fails=1; }
+# Dropping signing on purpose: REPIN with no signing.pub turns the requirement off and forgets the pin.
+(export XDG_CONFIG_HOME="$TMP/config3"; mkdir -p "$TMP/config3/tartarus" && echo x > "$TMP/config3/tartarus/kit-signing.pub"
+ TARTARUS_REPIN=1 "$TMP/copy/bin/tartarus" setup >/dev/null 2>&1) || { echo "FAIL: REPIN setup without a key"; fails=1; }
+[[ ! -e "$TMP/config3/tartarus/kit-signing.pub" && "$(cat "$TMP/state/kit.requireSignature")" == false ]] \
+  || { echo "FAIL: REPIN without a key left signing half on"; fails=1; }
+"$ROOT/bin/tartarus" setup >/dev/null
 
 # A policy line that isn't a hostname is refused, before setup changes anything.
 cp -r "$ROOT/policy" "$TMP/badpolicy" && printf 'ok.example\n--all\n' > "$TMP/badpolicy/deny.txt"
