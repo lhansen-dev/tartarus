@@ -38,8 +38,8 @@ DC="--deny-network mcp-proxy.anthropic.com --deny-network bridge.claudeuserconte
 DC+=" --deny-network downloads.claude.ai --deny-network claude.ai --deny-network console.anthropic.com"
 DX="--deny-network github.com --deny-network api.github.com --deny-network codeload.github.com"
 check "run claude" "sbx $R $DC claude ."
-check "run codex --name x --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
-  "sbx $R $DX --name x --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
+check "run codex --name xy --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
+  "sbx $R $DX --name xy --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
 check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit:latest copilot ."
 export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."; unset TARTARUS_REGISTRIES
 check "run gemini" ""
@@ -70,7 +70,11 @@ rm "$TMP/sec/.env.local"; mkdir -p "$TMP/lib/conf" && touch "$TMP/lib/conf/crede
 check "run claude $TMP/sec $TMP/lib" ""
 rm "$TMP/lib/conf/credentials.json"
 check "run claude $TMP/sec $TMP/lib" "sbx $R $DC claude $TMP/sec $TMP/lib:ro"
-check "rm a b" "sbx rm --force b"
+check "rm ab cd" "sbx rm --force cd"
+check "rm ab --all" ""                    # a flag as a name: refused before anything is removed
+check "run claude --name --kit ." ""
+: > "$TMP/log"; "$ROOT/bin/tartarus" verify -u >/dev/null 2>&1 || true
+grep -q 'exec' "$TMP/log" && { echo "FAIL: verify took a flag as a sandbox name"; fails=1; }
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
 check "setup" "sbx daemon restart"
@@ -116,6 +120,26 @@ mkdir "$TMP/copy" && cp -r "$ROOT/bin" "$ROOT/kits" "$ROOT/policy" "$ROOT/libexe
 "$TMP/copy/bin/tartarus" setup >/dev/null 2>&1 && { echo "FAIL: setup accepted a deleted signing.pub"; fails=1; }
 : > "$TMP/log"; "$TMP/copy/bin/tartarus" run claude >/dev/null 2>&1 || true; [[ ! -s "$TMP/log" ]] || { echo "FAIL: run with signing.pub deleted"; fails=1; }
 "$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit after the copy tests"; fails=1; }
+
+# A policy line that isn't a hostname is refused, before setup changes anything.
+cp -r "$ROOT/policy" "$TMP/badpolicy" && printf 'ok.example\n--all\n' > "$TMP/badpolicy/deny.txt"
+: > "$TMP/log"; out="$(TARTARUS_DENY_FILE="$TMP/badpolicy/deny.txt" TARTARUS_SIGNING_KEY=/dev/null "$ROOT/bin/tartarus" config 2>&1 || true)"
+[[ "$out" == *"not a hostname: --all"* ]] || { echo "FAIL: bad host not refused: $out"; fails=1; }
+
+# sign-kits with a fresh key on the copy (signing.pub deleted above), then setup with its own config.
+echo '*.evil.example' >> "$TMP/copy/policy/deny-claude.txt"
+copy() { TARTARUS_SIGNING_KEY="$TMP/test.key" XDG_CONFIG_HOME="$TMP/config2" "$TMP/copy/bin/tartarus" "$@"; }
+copy sign-kits >/dev/null && [[ -s "$TMP/copy/kits/signing.pub" ]] || { echo "FAIL: sign-kits made no key"; fails=1; }
+copy setup >/dev/null && copy audit >/dev/null || { echo "FAIL: audit after sign-kits and setup"; fails=1; }
+# A wildcard deny reaches sbx as written, not globbed against files in the current directory.
+mkdir "$TMP/cwd" && touch "$TMP/cwd/a.evil.example"
+: > "$TMP/log"; (cd "$TMP/cwd" && copy run claude --name gl "$TMP/sec" >/dev/null 2>&1) || true
+grep -qF -- '--deny-network *.evil.example ' "$TMP/log" || { echo "FAIL: wildcard deny entry: $(cat "$TMP/log")"; fails=1; }
+# An edit after signing is refused.
+echo extra.example >> "$TMP/copy/policy/deny-claude.txt"
+: > "$TMP/log"; copy run claude --name gl "$TMP/sec" >/dev/null 2>&1 || true
+[[ ! -s "$TMP/log" ]] || { echo "FAIL: run took an edited, unsigned deny list"; fails=1; }
+"$ROOT/bin/tartarus" setup >/dev/null  # back to the repo's key for the tests below
 
 # Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
 name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true

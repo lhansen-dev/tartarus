@@ -61,6 +61,8 @@ EOF
 }
 
 die() { echo "tartarus: $*" >&2; exit 1; }
+# sbx's own rule. Also keeps a name from reaching sbx as a flag (rm --all would remove every sandbox).
+check_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9.-]+$ && "$1" != default ]] || die "invalid sandbox name '$1' (letters, digits, - and .)"; }
 json_eq() { python3 -c 'import json, sys; sys.exit(json.loads(sys.argv[1]) != json.loads(sys.argv[2]))' "$1" "$2" 2>/dev/null; }
 indent() { while IFS= read -r line; do echo "          $line"; done <<<"$1"; }
 
@@ -74,8 +76,16 @@ harness_kit() {
   esac
 }
 
-# One host per line; blank lines and # comments (whole-line or trailing) are ignored.
-hosts_in() { [[ -f "$1" ]] && sed -e 's/#.*//' -e 's/[[:space:]]//g' "$1" | grep -v '^$' || true; }
+# One host per line; blank lines and # comments (whole-line or trailing) are ignored. Anything
+# that isn't a hostname or wildcard is refused: it would reach sbx as an argument, maybe a flag.
+hosts_in() {
+  [[ -f "$1" ]] || return 0
+  local hosts bad
+  hosts="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$1" | grep -v '^$' || true)"
+  bad="$(grep -vE '^(\*\*?\.)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' <<<"$hosts" | grep -v '^$' || true)"
+  [[ -z "$bad" ]] || die "$1: not a hostname: $(paste -sd' ' <<<"$bad")"
+  [[ -z "$hosts" ]] || echo "$hosts"
+}
 deny_hosts() { hosts_in "$DENY_FILE"; }
 
 # Policy files are signed like kits: an edited deny list would quietly loosen every sandbox.
@@ -100,6 +110,7 @@ cmd_setup() {
   fi
   local policy; mapfile -t policy < <(policy_files)
   check_policy "$REPO_PUB" "${policy[@]}"
+  deny_hosts >/dev/null  # refuse a bad entry before changing anything
   for kv in "${SETTINGS[@]}"; do sbx settings set "${kv%%=*}" "${kv#*=}"; done
   sbx settings set kit.allowedSources "$KIT_SOURCES"
   # Rebuild the global policy from scratch so stale allows can't survive a re-run.
@@ -154,11 +165,11 @@ print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if 
   pending="$(sbx policy approval ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
   ((pending == 0)) || echo "  info  $pending pending approval prompt(s): dismiss them, don't allow (sbx policy approval ls)"
   # A host named only in an allow rule doesn't count; it must be in a global deny.
-  local missing hosts; mapfile -t hosts < <(deny_hosts)
+  local missing hosts; hosts="$(deny_hosts)"
   missing="$(python3 -c '
 import json, sys
 denied = {h for r in json.load(sys.stdin)["rules"] if r["scope"] == "global" and r["decision"] == "deny" for h in r["resources"]}
-print("\n".join(h for h in sys.argv[1:] if h not in denied))' "${hosts[@]}" <<<"$policy")"
+print("\n".join(h for h in sys.argv[1].split() if h not in denied))' "$hosts" <<<"$policy")"
   [[ -z "$missing" ]] || { echo "  FAIL  deny rules missing:"; indent "$missing"; fail=1; }
   json_eq "$(sbx settings get kit.allowedSources 2>/dev/null)" "$KIT_SOURCES" \
     || { echo "  FAIL  kit.allowedSources is not $KIT_SOURCES"; fail=1; }
@@ -235,13 +246,14 @@ cmd_run() {
   # list) would widen every new sandbox, so it doesn't get one.
   local report; report="$(cmd_audit)" || die "audit failed; fix it before running an agent:
 $report"
-  local host
+  local host denies
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
-  while read -r host; do args+=(--deny-network "$host"); done < <(hosts_in "$ROOT/policy/deny-$harness.txt")
+  denies="$(hosts_in "$ROOT/policy/deny-$harness.txt")"
+  while read -r host; do if [[ -n "$host" ]]; then args+=(--deny-network "$host"); fi; done <<<"$denies"
   local paths=() rest=()
   while (($#)); do
     case "$1" in
-      --name) [[ $# -ge 2 ]] || die "--name needs a value"; args+=(--name "$2"); shift 2 ;;
+      --name) [[ $# -ge 2 ]] || die "--name needs a value"; check_name "$2"; args+=(--name "$2"); shift 2 ;;
       --detach|-d) args+=(--detach); shift ;;
       --) shift; rest=("$@"); break ;;
       # sbx parses flags anywhere, so a stray --kit or --skills would reach it as a path.
@@ -332,6 +344,7 @@ cmd_review() {
 review_branch() {
   local name="${1:-}" branch="${2:-}"
   [[ -n "$name" && -n "$branch" ]] || die "review needs a sandbox name and branch"
+  check_name "$name"
   # --no-tags: the agent's tags would land in this repo, where a tag named main shadows the
   # branch (here and in every later git command) and a v1.2.3 can reach a release pipeline.
   # tagOpt keeps it that way for any later fetch of this remote (git fetch --all included).
@@ -410,6 +423,7 @@ cmd_config() {
 cmd_rm() {
   local name
   (($#)) || die "rm needs one or more sandbox names"
+  for name in "$@"; do check_name "$name"; done
   for name in "$@"; do
     sbx rm --force "$name"
     # sbx rm leaves the fetched refs behind in the host repo.
@@ -430,6 +444,7 @@ host_ips() {
 
 cmd_verify() {
   local name="${1:-}"; [[ -n "$name" ]] || die "verify needs a sandbox name"
+  check_name "$name"
   local fail=0 ips
   cmd_audit || fail=1
   local policy; mapfile -t policy < <(policy_files)
