@@ -488,7 +488,7 @@ RISKY=(
   # Environment managers and dotenv files, which set PATH, LD_PRELOAD or NODE_OPTIONS for later commands.
   '\.env|\.direnv/|\.?mise[./]|\.tool-versions|.*\.nix$|flake\.lock|devenv\.|devbox\.json|pixi\.toml|rust-toolchain|\.sdkmanrc|Brewfile|Procfile|Vagrantfile|Tiltfile'
   # Build and task files.
-  'Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|Rakefile|[Gg]runtfile|[Gg]ulpfile|CMakeLists\.txt|.*\.cmake$|CMake(User)?Presets\.json|meson\.build|configure(\.ac)?$|conanfile|vcpkg|build\.rs|build\.zig|Package\.swift|Podfile|Cartfile|mix\.exs|rebar\.config|.*\.cabal$|Setup\.l?hs$|stack\.yaml|Dockerfile|Containerfile|docker-compose|compose\.ya?ml|docker-bake'
+  'Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|Rakefile|[Gg]runtfile|[Gg]ulpfile|CMakeLists\.txt|.*\.cmake$|CMake(User)?Presets\.json|meson\.build|configure(\.ac)?$|conanfile|vcpkg|build\.rs|build\.zig|Package\.swift|Podfile|Cartfile|[^/]*\.xcodeproj/|[^/]*\.xcworkspace/|[^/]*\.xcconfig$|\.xcode-version|mix\.exs|rebar\.config|.*\.cabal$|Setup\.l?hs$|stack\.yaml|Dockerfile|Containerfile|docker-compose|compose\.ya?ml|docker-bake'
   '\.bazelrc|\.bazelversion|BUILD(\.bazel)?$|WORKSPACE(\.bazel)?$|MODULE\.bazel|.*\.bzl$|BUCK$|\.buckconfig|pants\.toml'
   # JVM and .NET builds: wrappers and properties can fetch and run any build tool or JVM agent.
   '.*\.gradle(\.kts)?$|gradlew|gradle\.properties|gradle-wrapper\.properties|buildSrc/|mvnw|\.mvn/|pom\.xml|.*\.sbt$|\.sbtopts|\.jvmopts|project/[^/]*\.scala$|.*\.(cs|fs|vb)proj$|.*\.(props|targets)$|nuget\.config|global\.json'

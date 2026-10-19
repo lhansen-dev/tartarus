@@ -338,6 +338,7 @@ grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify require
   mkdir -p gradle/wrapper infra lib docs && touch rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties \
     infra/main.tf .devcontainer.json CLAUDE.local.md mise.local.toml .env.local .pylintrc src/environment.ts src/props.md \
     gradle/wrapper/gradle-wrapper.jar lib/fast.so docs/CODEOWNERS renovate.json sbxenv.yaml
+  mkdir -p App.xcodeproj && touch App.xcodeproj/project.pbxproj
   git add -A && git update-index --add --cacheinfo 160000,"$(git rev-parse HEAD)",vendor/dep && git commit -q -m more
   git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
@@ -365,7 +366,7 @@ if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/pack
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
 fi
 for f in rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties infra/main.tf .devcontainer.json \
-  CLAUDE.local.md mise.local.toml .env.local .pylintrc gradle/wrapper/gradle-wrapper.jar "vendor/dep (submodule)" docs/CODEOWNERS renovate.json sbxenv.yaml; do
+  CLAUDE.local.md mise.local.toml .env.local .pylintrc gradle/wrapper/gradle-wrapper.jar "vendor/dep (submodule)" docs/CODEOWNERS renovate.json sbxenv.yaml App.xcodeproj/project.pbxproj; do
   [[ "$out" == *"  $f"* ]] || { echo "FAIL: review missed $f"; fails=1; }
 done
 [[ "${out#*REVIEW BEFORE}" != *environment.ts* && "${out#*REVIEW BEFORE}" != *props.md* ]] || { echo "FAIL: review flagged plain source"; fails=1; }
