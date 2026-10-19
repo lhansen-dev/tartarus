@@ -1,12 +1,29 @@
 #!/usr/bin/env bash
-# Checks the sbx commands tartarus builds, using a stub sbx that logs its argv.
+# Checks the sbx commands tartarus builds, using a stub sbx that logs the argv of every call
+# that changes something. It keeps settings in $TMP/state, so after setup, audit passes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-printf '#!/bin/sh\necho "sbx $*" >> "%s/log"\ncase "$*" in "settings get kit.trustedSigners") echo "[]" ;; esac\n' "$TMP" > "$TMP/sbx"
+mkdir -p "$TMP/state"
+cat > "$TMP/sbx" <<EOF
+#!/bin/sh
+S="$TMP/state"
+case "\$*" in
+  "settings get "*) cat "\$S/\$3" 2>/dev/null || { [ "\$3" = kit.trustedSigners ] && echo "[]"; }; exit 0 ;;
+  "settings set "*) printf '%s\n' "\$4" > "\$S/\$3" ;;
+  "settings unset "*) rm -f "\$S/\$3" ;;
+  "policy ls --json"*) cat "\$S/policy" 2>/dev/null || echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}]}'; exit 0 ;;
+  "policy approval ls") echo HEADER; exit 0 ;;
+  "kit verify "*) exit 0 ;;
+  "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
+  "secret ls --quiet") exit 0 ;;
+esac
+echo "sbx \$*" >> "$TMP/log"
+EOF
 chmod +x "$TMP/sbx"
 export PATH="$TMP:$PATH" TARTARUS_BASELINE_KIT=KIT XDG_CONFIG_HOME="$TMP/config"
+"$ROOT/bin/tartarus" setup >/dev/null
 
 fails=0
 check() { # check "<tartarus args>" "<expected last sbx line>"
@@ -86,6 +103,19 @@ check "run claude" "sbx $R $DC claude ."
 cp "$ROOT/kits/no-root/spec.yaml" "$TMP/config/tartarus/kit-signing.pub" 2>/dev/null
 check "run claude" ""
 cp "$TMP/pinned" "$TMP/config/tartarus/kit-signing.pub"
+
+# run refuses a machine that fails audit: a registered MCP server, an allow from an approved prompt.
+echo "NAME  COMMAND" > "$TMP/state/mcp"; check "run claude" ""; rm "$TMP/state/mcp"
+echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/policy"
+check "run claude" ""; rm "$TMP/state/policy"
+check "run claude" "sbx $R $DC claude ."
+
+# Deleting kits/signing.pub must not switch signature checks off (a copy, so the repo is untouched).
+mkdir "$TMP/copy" && cp -r "$ROOT/bin" "$ROOT/kits" "$ROOT/policy" "$ROOT/libexec" "$TMP/copy/" && rm "$TMP/copy/kits/signing.pub"
+"$TMP/copy/bin/tartarus" audit >/dev/null 2>&1 && { echo "FAIL: audit passed with signing.pub deleted"; fails=1; }
+"$TMP/copy/bin/tartarus" setup >/dev/null 2>&1 && { echo "FAIL: setup accepted a deleted signing.pub"; fails=1; }
+: > "$TMP/log"; "$TMP/copy/bin/tartarus" run claude >/dev/null 2>&1 || true; [[ ! -s "$TMP/log" ]] || { echo "FAIL: run with signing.pub deleted"; fails=1; }
+"$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit after the copy tests"; fails=1; }
 
 # Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
 name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true

@@ -12,7 +12,7 @@ Requires `sbx` (signed in with `sbx login`), `git`, `python3` and `openssl`. `yq
 # macOS: brew install docker/tap/sbx    Ubuntu: sudo apt-get install docker-sbx
 ln -s "$PWD/bin/tartarus" ~/.local/bin/tartarus
 tartarus setup    # harden sbx on this machine; restarts the sbx daemon, stopping running sandboxes
-tartarus audit    # check the machine still matches setup
+tartarus audit    # check the machine still matches setup (run does this too, and refuses to start if it fails)
 ```
 
 ## Use
@@ -51,7 +51,7 @@ tartarus rm feat1
 | Mount paths holding `.env`, keys and similar untracked files | `TARTARUS_ALLOW_SECRET_FILES=1` | next `run` |
 | Alternate kit, deny file, kit sources, signing key | `TARTARUS_BASELINE_KIT`, `TARTARUS_DENY_FILE`, `TARTARUS_KIT_SOURCES`, `TARTARUS_SIGNING_KEY` | |
 
-Kits and policy files are signed: an edited, unsigned or missing one is refused by `sbx`, `setup`, `run` and `audit` until it's re-signed. A changed `kits/signing.pub` is refused by `setup` until you re-run it with `TARTARUS_REPIN=1`.
+Kits and policy files are signed: an edited, unsigned or missing one is refused by `sbx`, `setup`, `run` and `audit` until it's re-signed. A changed or deleted `kits/signing.pub` is refused by `setup` until you re-run it with `TARTARUS_REPIN=1`.
 
 ## What it does and doesn't protect
 

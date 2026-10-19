@@ -94,8 +94,9 @@ cmd_setup() {
   local kv
   # setup trusts whatever kits/signing.pub says, so a swapped key (with re-signed kits and
   # policy) would otherwise be trusted silently on the next run. Make that a deliberate step.
-  if [[ -f "$PINNED_PUB" && -f "$REPO_PUB" && "${TARTARUS_REPIN:-}" != 1 ]] && ! cmp -s "$REPO_PUB" "$PINNED_PUB"; then
-    die "kits/signing.pub changed since the last setup; check who changed it (git log kits/signing.pub), then TARTARUS_REPIN=1 tartarus setup"
+  # Deleting it counts as a change: that would switch signature checks off.
+  if [[ -f "$PINNED_PUB" && "${TARTARUS_REPIN:-}" != 1 ]] && ! cmp -s "$REPO_PUB" "$PINNED_PUB"; then
+    die "kits/signing.pub changed or was removed since the last setup; check who did it (git log kits/signing.pub), then TARTARUS_REPIN=1 tartarus setup"
   fi
   local policy; mapfile -t policy < <(policy_files)
   check_policy "$REPO_PUB" "${policy[@]}"
@@ -119,6 +120,8 @@ print(json.dumps(json.load(sys.stdin) + [{"key": sys.argv[1]}]))' "$PINNED_PUB")
     printf '%s\n' "$signers" > "$SIGNERS"
     sbx settings set kit.requireSignature true
   else
+    rm -f "$PINNED_PUB" "$SIGNERS"
+    sbx settings set kit.requireSignature false
     echo "tartarus: no kits/signing.pub; kit signatures not enforced (see: tartarus sign-kits)"
   fi
   # ssh.* settings only reach the daemon after a restart; this stops running sandboxes.
@@ -159,9 +162,10 @@ print("\n".join(h for h in sys.argv[1:] if h not in denied))' "${hosts[@]}" <<<"
   [[ -z "$missing" ]] || { echo "  FAIL  deny rules missing:"; indent "$missing"; fail=1; }
   json_eq "$(sbx settings get kit.allowedSources 2>/dev/null)" "$KIT_SOURCES" \
     || { echo "  FAIL  kit.allowedSources is not $KIT_SOURCES"; fail=1; }
-  if [[ -f "$REPO_PUB" ]]; then
+  # A pinned key with no kits/signing.pub means someone deleted it: check, and fail on, both.
+  if [[ -f "$REPO_PUB" || -f "$PINNED_PUB" ]]; then
     [[ "$(sbx settings get kit.requireSignature)" == true ]] || { echo "  FAIL  kit.requireSignature is off"; fail=1; }
-    cmp -s "$REPO_PUB" "$PINNED_PUB" || { echo "  FAIL  kits/signing.pub differs from the key setup pinned ($PINNED_PUB)"; fail=1; }
+    cmp -s "$REPO_PUB" "$PINNED_PUB" || { echo "  FAIL  kits/signing.pub is not the key tartarus setup pinned ($PINNED_PUB); run setup"; fail=1; }
     # An extra signer would let kits signed by anyone else in.
     json_eq "$(sbx settings get kit.trustedSigners 2>/dev/null)" "$(cat "$SIGNERS" 2>/dev/null)" \
       || { echo "  FAIL  kit.trustedSigners differs from what setup set ($SIGNERS)"; fail=1; }
@@ -227,7 +231,10 @@ cmd_run() {
   [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] || args+=(--kit "$ROOT/kits/no-root")
   [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && args+=(--kit "$ROOT/kits/registries")
   [[ -n "$kit" ]] && args+=(--kit "$kit")
-  check_policy "$PINNED_PUB" "$ROOT/policy/deny-$harness.txt"
+  # A drifted machine (an approved prompt's allow, a registered MCP server, an unsigned deny
+  # list) would widen every new sandbox, so it doesn't get one.
+  local report; report="$(cmd_audit)" || die "audit failed; fix it before running an agent:
+$report"
   local host
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
   while read -r host; do args+=(--deny-network "$host"); done < <(hosts_in "$ROOT/policy/deny-$harness.txt")
