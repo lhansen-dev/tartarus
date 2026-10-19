@@ -164,9 +164,10 @@ grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: ver
   git clone -q host agent && cd agent
   git checkout -q -b safe && echo hi > README.md && git add -A && git commit -q -m safe
   git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json yarn.lock CLAUDE.md docs.md && git add -A && git commit -q -m risky
-  mkdir -p gradle/wrapper infra && touch rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties \
-    infra/main.tf .devcontainer.json CLAUDE.local.md mise.local.toml .env.local .pylintrc src/environment.ts src/props.md
-  git add -A && git commit -q -m more
+  mkdir -p gradle/wrapper infra lib && touch rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties \
+    infra/main.tf .devcontainer.json CLAUDE.local.md mise.local.toml .env.local .pylintrc src/environment.ts src/props.md \
+    gradle/wrapper/gradle-wrapper.jar lib/fast.so
+  git add -A && git update-index --add --cacheinfo 160000,"$(git rev-parse HEAD)",vendor/dep && git commit -q -m more
   git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
   # A tag named main at the risky commit would make the review diff risky against itself.
@@ -181,7 +182,7 @@ if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/pack
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
 fi
 for f in rust-toolchain.toml Directory.Build.props gradle/wrapper/gradle-wrapper.properties infra/main.tf .devcontainer.json \
-  CLAUDE.local.md mise.local.toml .env.local .pylintrc; do
+  CLAUDE.local.md mise.local.toml .env.local .pylintrc gradle/wrapper/gradle-wrapper.jar "vendor/dep (submodule)"; do
   [[ "$out" == *"  $f"* ]] || { echo "FAIL: review missed $f"; fails=1; }
 done
 [[ "${out#*REVIEW BEFORE}" != *environment.ts* && "${out#*REVIEW BEFORE}" != *props.md* ]] || { echo "FAIL: review flagged plain source"; fails=1; }

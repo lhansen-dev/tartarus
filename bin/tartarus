@@ -325,6 +325,9 @@ RISKY=(
   '.*\.config\.[cm]?[jt]s$|.*\.conf\.[cm]?[jt]s$|.*\.workspace\.[cm]?[jt]s$|\.[a-z]+rc\.[cm]?js$|\.babelrc|babel\.config|\.storybook/'
   # Infrastructure as code: terraform plan runs external data sources; ansible loads ./ansible.cfg.
   '.*\.tf$|.*\.tofu$|\.terraformrc|terragrunt\.hcl|ansible\.cfg'
+  # Compiled code nobody can review by reading the diff; gradlew runs gradle-wrapper.jar, Python
+  # imports a .pyc that has no .py, Node loads .node addons.
+  '.*\.(jar|war|class|pyc|pyo|so|dylib|dll|exe|node|wasm|whl|egg|a|o)$'
 )
 RISKY_PATHS="(^|/)($(IFS='|'; echo "${RISKY[*]}"))"
 
@@ -366,8 +369,10 @@ review_branch() {
   # -i: case-insensitive filesystems (macOS) open .VSCode/ as .vscode/.
   local risky links
   risky="$(git diff --no-renames --name-only -z "$range" | grep -izE "$RISKY_PATHS" | tr '\0' '\n' || true)"
-  # A symlink can point a build or IDE at any host file once checked out.
-  links="$(git diff --no-renames --raw "$range" | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"}')"
+  # A symlink can point a build or IDE at any host file once checked out; a moved submodule
+  # pointer makes git submodule update check out other code with no .gitmodules change.
+  links="$(git diff --no-renames --raw "$range" \
+    | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"} index($1, " 160000 ") {print $2 " (submodule)"}')"
   risky="$(printf '%s\n%s' "$risky" "$links" | sed '/^$/d')"
   # The list only covers files that run on their own. Running tests or the app runs every changed file.
   local after="Every changed file runs once you test, build or start the app on the host: read the whole
