@@ -200,6 +200,13 @@ check "run claude --name same $TMP/a/app -- -c" "sbx run --name same -- -c"  # r
 check "run claude --name same $TMP/a/app $TMP/lib:rw" ""
 TARTARUS_ALLOW_ROOT=1 check "run claude --name same $TMP/a/app" ""
 echo other >> "$TMP/state/sandboxes"; check "run claude --name other $TMP/a/app" ""  # not made by tartarus
+# ls: current, made under an older lockdown, or not by tartarus at all.
+printf 'same\n' > "$TMP/state/sandboxes"
+out="$("$ROOT/bin/tartarus" ls)" || { echo "FAIL: ls of a current sandbox exited $?"; fails=1; }
+[[ "$out" == *"same"*"current"* ]] || { echo "FAIL: ls: $out"; fails=1; }
+sed -i 's/ [0-9]*$/ 1/' "$TMP/config/tartarus/sandboxes/same"; printf 'same\nother\n' > "$TMP/state/sandboxes"
+rc=0; out="$("$ROOT/bin/tartarus" ls)" || rc=$?
+[[ $rc == 1 && "$out" == *"same"*"older lockdown"* && "$out" == *"other"*"not made by tartarus"* ]] || { echo "FAIL: ls stale (exit $rc): $out"; fails=1; }
 "$ROOT/bin/tartarus" rm same >/dev/null 2>&1; [[ ! -e "$TMP/config/tartarus/sandboxes/same" ]] || { echo "FAIL: rm kept the record"; fails=1; }
 rm "$TMP/state/sandboxes"
 

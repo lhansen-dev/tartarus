@@ -32,6 +32,7 @@ tartarus review feat1 <branch>           # fetch the agent's branch without chec
 git branch my-feature <commit review printed>  # not the branch: it moves on the next fetch
 tartarus rm feat1                        # also dismisses its pending approval prompts
 tartarus dismiss                         # dismiss every pending prompt; never allow one
+tartarus ls                              # which sandboxes predate the current lockdown: rm those
 ```
 
 A sandbox keeps the config it was created with. Change tartarus, a kit, the policy, or a run's paths, and the next `run` makes a new sandbox; with `--name`, it refuses until you `tartarus rm` the old one.
