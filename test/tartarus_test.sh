@@ -164,6 +164,15 @@ grep -qE -- '--name tartarus-claude-my-repo--2--[0-9]+ ' "$TMP/log" || { echo "F
 
 # verify passes the script and deny list as arguments: files in the sandbox's /tmp are the agent's to swap.
 sh -n "$ROOT/libexec/verify-inside.sh" || { echo "FAIL: verify-inside.sh syntax"; fails=1; }
+# Kit startup commands run as root: absolute /bin/sh (root's PATH starts with agent dirs) and valid sh.
+for spec in "$ROOT"/kits/*/spec.yaml; do
+  command -v yq >/dev/null || break
+  n="$(yq -r '(.setup.startup // []) | length' "$spec")"
+  for ((i = 0; i < n; i++)); do
+    [[ "$(yq -r ".setup.startup[$i].command[0]" "$spec")" == /bin/sh ]] || { echo "FAIL: $spec startup $i: not /bin/sh"; fails=1; }
+    yq -r ".setup.startup[$i].command[2]" "$spec" | sh -n || { echo "FAIL: $spec startup $i syntax"; fails=1; }
+  done
+done
 : > "$TMP/log"; "$ROOT/bin/tartarus" verify box >/dev/null 2>&1 || true
 grep -q '^sbx cp' "$TMP/log" && { echo "FAIL: verify copied files into the sandbox"; fails=1; }
 grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: verify did not pass the deny list"; fails=1; }

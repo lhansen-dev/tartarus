@@ -49,6 +49,24 @@ if command -v kubectl >/dev/null && kubectl config current-context >/dev/null 2>
 if [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; then echo "  info  agent has root (TARTARUS_ALLOW_ROOT=1?)"
 else pass "agent has no root"; fi
 if docker ps >/dev/null 2>&1; then echo "  info  agent can use Docker (root in the guest)"; fi
+# Root processes (startup commands, dockerd, sbx exec -u root) inherit PID 1's PATH and BASH_ENV,
+# which the agent can read: a command it plants or a directory it swaps anywhere on that PATH
+# runs as root on the next start. Swapping needs a writable parent and a path that isn't a mount point.
+if [ "$(id -u)" != 0 ] && ! sudo -n true 2>/dev/null; then
+  rootpath="$(tr '\0' '\n' < /proc/1/environ 2>/dev/null | sed -n 's/^PATH=//p')"
+  swappable=""
+  for d in $(echo "${rootpath:-$PATH}" | tr ':' ' '); do
+    if [ -e "$d" ] && [ -w "$d" ]; then swappable="$swappable $d"; continue; fi
+    while [ "$d" != / ]; do  # any ancestor the agent could rename, with the PATH dir inside it
+      if [ -w "$(dirname "$d")" ] && ! mountpoint -q "$d"; then swappable="$swappable $d"; break; fi
+      d="$(dirname "$d")"
+    done
+  done
+  [ -z "$swappable" ] && pass "root's PATH holds nothing the agent can change" || bad "agent can change root's PATH:$swappable"
+  bashenv="$(tr '\0' '\n' < /proc/1/environ 2>/dev/null | sed -n 's/^BASH_ENV=//p')"
+  if [ -n "$bashenv" ] && [ -w "$bashenv" ]; then bad "agent can write $bashenv, which every root bash runs"
+  else pass "BASH_ENV file not agent-writable"; fi
+fi
 
 echo "host surfaces"
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/1000}/wayland-0" ] || pgrep -f '^/usr/local/bin/clipboard-bridge' >/dev/null; then

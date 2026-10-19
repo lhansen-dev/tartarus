@@ -13,6 +13,7 @@ setup:
   startup:
     # The image runs a Wayland clipboard bridge to the host. tartarus setup turns host
     # clipboard sharing off; this also removes the in-VM end so nothing can talk to it.
-    - command: ["sh", "-c", "pkill -f '^/usr/local/bin/clipboard-bridge'; rm -f /run/user/1000/wayland-0; true"]
+    # Absolute paths: root's PATH starts with directories the agent can write (see kits/no-root).
+    - command: ["/bin/sh", "-c", "/usr/bin/pkill -f '^/usr/local/bin/clipboard-bridge'; /bin/rm -f /run/user/1000/wayland-0; true"]
       user: "0"
       description: Remove the host clipboard bridge
