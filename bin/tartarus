@@ -150,32 +150,36 @@ cmd_audit() {
     got="$(sbx settings get "${kv%%=*}" 2>/dev/null || true)"
     [[ "$got" == "${kv#*=}" ]] || { echo "  FAIL  ${kv%%=*} is '$got', want '${kv#*=}'"; fail=1; }
   done
-  # Global network allows widen every sandbox past its kit; deny-all has none.
-  local policy allows
-  policy="$(sbx policy ls --json)"
-  allows="$(python3 -c '
+  # audit runs inside $(...) for run, where set -e is off: every read below fails closed by hand.
+  # Allows widen sandboxes past their kits. A kit's own are 'provisioned'; a global allow, a
+  # hand-added one, or one saved by approving a blocked-request prompt (agents trigger those on
+  # purpose) is not. Every deny.txt host must be in a global deny; an allow naming it doesn't count.
+  local policy report hosts
+  hosts="$(deny_hosts)"
+  policy="$(sbx policy ls --json)" || policy=""
+  report="$(python3 -c '
 import json, sys
-rules = json.load(sys.stdin)["rules"]
-print("\n".join(", ".join(r["resources"]) for r in rules
-  if r["scope"] == "global" and r["resource_type"] == "network" and r["decision"] == "allow"))' <<<"$policy")"
-  [[ -z "$allows" ]] || { echo "  FAIL  global network allows: $allows"; fail=1; }
-  # Approving a blocked-request prompt saves a permanent allow; agents can trigger prompts on purpose.
-  local approved
-  approved="$(sbx policy ls --json --created-via approval | python3 -c '
+rules = json.load(sys.stdin)["rules"] or []
+for r in rules:
+    via = (r.get("provenance") or {}).get("created_via")
+    if r["resource_type"] == "network" and r["decision"] == "allow" and (r["scope"] == "global" or via != "provisioned"):
+        fix = "" if r["scope"] == "global" else "  (sbx policy rm network --sandbox %s --resource HOST --force)" % r["scope"].split(":", 1)[-1]
+        print("  FAIL  network allow (%s, %s): %s%s" % (r["scope"], via, ", ".join(r["resources"]), fix))
+denied = {h for r in rules if r["scope"] == "global" and r["decision"] == "deny" for h in r["resources"]}
+for h in sys.argv[1].split():
+    if h not in denied: print("  FAIL  deny rule missing: " + h)' "$hosts" <<<"$policy" 2>/dev/null)" \
+    || report="  FAIL  can't read the sbx policy (sbx policy ls --json)"
+  # Approval-made allows are listed apart too, in case the full listing ever leaves them out.
+  report+="$(sbx policy ls --json --created-via approval | python3 -c '
 import json, sys
-rules = json.load(sys.stdin).get("rules") or []
-print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if r["decision"] == "allow"))')"
-  [[ -z "$approved" ]] || { echo "  FAIL  allows created by approving prompts:"; indent "$approved"; fail=1; }
+for r in json.load(sys.stdin).get("rules") or []:
+    if r["decision"] == "allow": print("\n  FAIL  allow made by approving a prompt (%s): %s" % (r["scope"], ", ".join(r["resources"])))' 2>/dev/null)" \
+    || report+=$'\n'"  FAIL  can't list approval-made rules"
+  report="$(sed '/^$/d' <<<"$report" | sort -u)"
+  [[ -z "$report" ]] || { echo "$report"; fail=1; }
   local pending
   pending="$(sbx policy approval ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
   ((pending == 0)) || echo "  info  $pending pending approval prompt(s): never allow them; clear them with tartarus dismiss"
-  # A host named only in an allow rule doesn't count; it must be in a global deny.
-  local missing hosts; hosts="$(deny_hosts)"
-  missing="$(python3 -c '
-import json, sys
-denied = {h for r in json.load(sys.stdin)["rules"] if r["scope"] == "global" and r["decision"] == "deny" for h in r["resources"]}
-print("\n".join(h for h in sys.argv[1].split() if h not in denied))' "$hosts" <<<"$policy")"
-  [[ -z "$missing" ]] || { echo "  FAIL  deny rules missing:"; indent "$missing"; fail=1; }
   json_eq "$(sbx settings get kit.allowedSources 2>/dev/null)" "$KIT_SOURCES" \
     || { echo "  FAIL  kit.allowedSources is not $KIT_SOURCES"; fail=1; }
   # A pinned key with no kits/signing.pub means someone deleted it: check, and fail on, both.
@@ -200,7 +204,8 @@ print("\n".join(h for h in sys.argv[1].split() if h not in denied))' "$hosts" <<
   local mcp; mcp="$(sbx mcp ls 2>&1 || true)"
   [[ "$mcp" == *"No MCP servers registered"* ]] || { echo "  FAIL  MCP servers registered (sbx mcp ls):"; indent "$mcp"; fail=1; }
   # A github secret would let the proxy push to github.com for the agent.
-  if sbx secret ls --quiet | grep -qx github; then echo "  FAIL  'github' secret stored"; fail=1; fi
+  local secrets; secrets="$(sbx secret ls --quiet)" || { echo "  FAIL  can't list secrets (sbx secret ls)"; fail=1; }
+  if grep -qx github <<<"$secrets"; then echo "  FAIL  'github' secret stored"; fail=1; fi
   ((fail)) && { echo "audit: FAIL (settings and policy: tartarus setup; others: fix as listed)"; return 1; }
   echo "audit: OK (settings pinned, global policy deny-all, no github secret)"
 }

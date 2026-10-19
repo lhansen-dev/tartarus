@@ -13,11 +13,12 @@ case "\$*" in
   "settings get "*) cat "\$S/\$3" 2>/dev/null || { [ "\$3" = kit.trustedSigners ] && echo "[]"; }; exit 0 ;;
   "settings set "*) printf '%s\n' "\$4" > "\$S/\$3" ;;
   "settings unset "*) rm -f "\$S/\$3" ;;
-  "policy ls --json"*) cat "\$S/policy" 2>/dev/null || echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}]}'; exit 0 ;;
+  "policy ls --json --created-via approval") cat "\$S/approved" 2>/dev/null || echo '{"rules": []}'; exit 0 ;;
+  "policy ls --json"*) [ -f "\$S/broken" ] && exit 1; cat "\$S/policy" 2>/dev/null || echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}]}'; exit 0 ;;
   "policy approval ls") cat "\$S/approvals" 2>/dev/null || echo HEADER; exit 0 ;;
   "kit verify "*) exit 0 ;;
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
-  "secret ls --quiet") exit 0 ;;
+  "secret ls --quiet") [ -f "\$S/broken-secrets" ] && exit 1; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
 EOF
@@ -123,6 +124,16 @@ cp "$TMP/pinned" "$TMP/config/tartarus/kit-signing.pub"
 echo "NAME  COMMAND" > "$TMP/state/mcp"; check "run claude" ""; rm "$TMP/state/mcp"
 echo '{"rules": [{"scope": "global", "resource_type": "network", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/policy"
 check "run claude" ""; rm "$TMP/state/policy"
+# A hand-added per-sandbox allow counts too; a kit's own (provisioned) allow doesn't.
+D='{"scope": "global", "resource_type": "network", "decision": "deny", "resources": ["*.prod.yourco.com"]}'
+echo "{\"rules\": [$D, {\"scope\": \"sandbox:ab\", \"resource_type\": \"network\", \"decision\": \"allow\", \"resources\": [\"pastebin.com\"], \"provenance\": {\"created_via\": \"added\"}}]}" > "$TMP/state/policy"
+check "run claude" ""
+sed -i 's/"added"/"provisioned"/' "$TMP/state/policy"; check "run claude" "sbx $R $DC claude ."; rm "$TMP/state/policy"
+# sbx failing to answer fails audit, rather than reading as "nothing wrong" (audit runs with set -e off).
+echo '{"rules": [{"scope": "sandbox:ab", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/approved"
+check "run claude" ""; rm "$TMP/state/approved"
+touch "$TMP/state/broken"; check "run claude" ""; rm "$TMP/state/broken"
+touch "$TMP/state/broken-secrets"; check "run claude" ""; rm "$TMP/state/broken-secrets"
 check "run claude" "sbx $R $DC claude ."
 
 # Deleting kits/signing.pub must not switch signature checks off (a copy, so the repo is untouched).
