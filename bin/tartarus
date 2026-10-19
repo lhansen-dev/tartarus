@@ -590,7 +590,8 @@ cmd_safe() {
   local cmd
   case "$harness" in
     copilot) cmd=(copilot --sandbox) ;;
-    codex) cmd=(codex --sandbox workspace-write) ;;
+    # ~/.codex/config.toml can turn the sandbox's network on (tested): force it off.
+    codex) cmd=(codex --sandbox workspace-write -c sandbox_workspace_write.network_access=false) ;;
     # Claude's own sandbox for its commands (bubblewrap and socat on Linux, Seatbelt on macOS),
     # refusing to start without one, with no way out of it and permission prompts kept on.
     claude) cmd=(claude --settings '{"sandbox": {"enabled": true, "failIfUnavailable": true, "allowUnsandboxedCommands": false, "autoAllowBashIfSandboxed": false}}') ;;
