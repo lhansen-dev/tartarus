@@ -263,9 +263,18 @@ for line in sys.argv[1].splitlines():
   # registered server is exposed to every agent; host stdio servers run commands on the host.
   local mcp; mcp="$(sbx mcp ls 2>&1 || true)"
   [[ "$mcp" == *"No MCP servers registered"* ]] || { echo "  FAIL  MCP servers registered (sbx mcp ls):"; indent "$mcp"; fail=1; }
-  # A github secret would let the proxy push to github.com for the agent.
-  local secrets; secrets="$(sbx secret ls --quiet)" || { echo "  FAIL  can't list secrets (sbx secret ls)"; fail=1; }
-  if grep -qx github <<<"$secrets"; then echo "  FAIL  'github' secret stored"; fail=1; fi
+  # The proxy adds every stored secret to its service's requests from any sandbox: a github one
+  # would let the agent push to github.com, a custom one reaches whatever domain it names. Only
+  # the model credentials belong here.
+  local secrets
+  secrets="$(sbx secret ls --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for s in d.get("secrets") or []:
+    if s["name"] not in ("anthropic", "openai", "copilot"): print("  FAIL  %s secret stored (%s): sbx secret rm" % (s["name"], s["scope"]))
+for s in d.get("custom_secrets") or []: print("  FAIL  custom secret stored: %s" % json.dumps(s))' 2>/dev/null)" \
+    || secrets="  FAIL  can't list secrets (sbx secret ls --json)"
+  [[ -z "$secrets" ]] || { echo "$secrets"; fail=1; }
   # The agent's session writes to this terminal: with set-clipboard on, an OSC 52 escape from the
   # sandbox sets your clipboard, ready for your next paste into a shell.
   if command -v tmux >/dev/null && [[ "$(tmux show -gv set-clipboard 2>/dev/null)" == on ]]; then
@@ -274,7 +283,7 @@ for line in sys.argv[1].splitlines():
   local old; old="$(cmd_ls 2>/dev/null | grep -cvE ' current$|^Remove ' || true)"
   ((old == 0)) || echo "  info  $old sandbox(es) predate the current lockdown or weren't made by tartarus (tartarus ls)"
   ((fail)) && { echo "audit: FAIL (settings and policy: tartarus setup; others: fix as listed)"; return 1; }
-  echo "audit: OK (settings pinned, global policy deny-all, no github secret)"
+  echo "audit: OK (settings pinned, global policy deny-all, only model credentials stored)"
 }
 
 cmd_login() {

@@ -20,7 +20,7 @@ case "\$*" in
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
   "ls --quiet") cat "\$S/sandboxes" 2>/dev/null; exit 0 ;;
   "ls --json") cat "\$S/ls.json" 2>/dev/null || echo "[]"; exit 0 ;;
-  "secret ls --quiet") [ -f "\$S/broken-secrets" ] && exit 1; exit 0 ;;
+  "secret ls --json") [ -f "\$S/broken-secrets" ] && exit 1; cat "\$S/secrets.json" 2>/dev/null || echo '{"secrets": [{"scope": "global", "name": "anthropic"}], "custom_secrets": []}'; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
 case "\$1" in exec) printf 'from the sandbox: \033]0;t\007\n' ;; esac
@@ -179,6 +179,10 @@ echo '{"rules": [{"scope": "sandbox:ab", "decision": "allow", "resources": ["evi
 check "run claude" ""; rm "$TMP/state/approved"
 touch "$TMP/state/broken"; check "run claude" ""; rm "$TMP/state/broken"
 touch "$TMP/state/broken-secrets"; check "run claude" ""; rm "$TMP/state/broken-secrets"
+# Only model credentials: a github or any other service secret, or a custom one, fails audit.
+echo '{"secrets": [{"scope": "global", "name": "github"}], "custom_secrets": []}' > "$TMP/state/secrets.json"; check "run claude" ""
+echo '{"secrets": [], "custom_secrets": [{"name": "x", "domain": "evil.example"}]}' > "$TMP/state/secrets.json"; check "run claude" ""
+rm "$TMP/state/secrets.json"
 check "run claude" "sbx $R $DC claude ."
 
 # Deleting kits/signing.pub must not switch signature checks off (a copy, so the repo is untouched).
