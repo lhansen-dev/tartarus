@@ -276,7 +276,10 @@ review_branch() {
   [[ -n "$name" && -n "$branch" ]] || die "review needs a sandbox name and branch"
   # --no-tags: the agent's tags would land in this repo, where a tag named main shadows the
   # branch (here and in every later git command) and a v1.2.3 can reach a release pipeline.
+  # tagOpt keeps it that way for any later fetch of this remote (git fetch --all included).
   local remote="sandbox-$name"
+  git config "remote.$remote.url" >/dev/null || die "no git remote $remote; is $name a sandbox of this repo?"
+  git config "remote.$remote.tagOpt" --no-tags
   git fetch --no-tags "$remote"
   # Full refnames from here on: a short name like main can resolve to something else.
   local ref="refs/remotes/$remote/$branch" range
@@ -373,12 +376,11 @@ cmd_verify() {
   local policy; mapfile -t policy < <(policy_files)
   check_policy "$PINNED_PUB" "${policy[@]}"
   mapfile -t ips < <(host_ips)
-  sbx cp "$ROOT/libexec/verify-inside.sh" "$name:/tmp/tartarus-verify.sh" >/dev/null
   # Every denied host must be blocked in any sandbox (wildcards can't be requested directly).
-  local blocked; blocked="$(mktemp)"
-  { deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' > "$blocked" || true
-  sbx cp "$blocked" "$name:/tmp/tartarus-blocked.txt" >/dev/null; rm -f "$blocked"
-  sbx exec "$name" sh /tmp/tartarus-verify.sh "${ips[@]}" 127.0.0.1 || fail=1
+  local blocked f
+  blocked="$({ deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' || true)"
+  # The script goes in as an argument, not a file: the agent can rewrite anything it can write.
+  sbx exec "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
   echo "Review egress with: sbx policy log $name"
   return "$fail"
 }

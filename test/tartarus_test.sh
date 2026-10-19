@@ -74,6 +74,12 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 : > "$TMP/log"; "$ROOT/bin/tartarus" run claude --name mine . >/dev/null 2>&1 || true
 [[ "$(grep -o -- '--name [^ ]*' "$TMP/log")" == "--name mine" ]] || { echo "FAIL: explicit --name overridden"; fails=1; }
 
+# verify passes the script and deny list as arguments: files in the sandbox's /tmp are the agent's to swap.
+sh -n "$ROOT/libexec/verify-inside.sh" || { echo "FAIL: verify-inside.sh syntax"; fails=1; }
+: > "$TMP/log"; "$ROOT/bin/tartarus" verify box >/dev/null 2>&1 || true
+grep -q '^sbx cp' "$TMP/log" && { echo "FAIL: verify copied files into the sandbox"; fails=1; }
+grep -qF 'verify-inside mcp-proxy.anthropic.com' "$TMP/log" || { echo "FAIL: verify did not pass the deny list"; fails=1; }
+
 # review: a local repo stands in for the sandbox's git remote.
 (
   set -e; cd "$TMP"; export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -99,7 +105,12 @@ if [[ $rc != 2 || "$out" != *".VSCode/tasks.json"* || "$out" != *".vscode/tâsks
   || "$out" != *"notes (symlink)"* || "${out#*REVIEW BEFORE}" == *workspace* ]]; then
   echo "FAIL: review sneaky (exit $rc)"; echo "$out"; fails=1
 fi
-[[ -z "$(git -C "$TMP/host" tag)" ]] || { echo "FAIL: review fetched the agent's tags"; fails=1; }
+git -C "$TMP/host" fetch -q --all
+[[ -z "$(git -C "$TMP/host" tag)" ]] || { echo "FAIL: review or a later fetch took the agent's tags"; fails=1; }
+rc=0; out="$(review nobranch)" || rc=$?
+[[ $rc == 1 && "$out" == *"it has:"*"  risky"* ]] || { echo "FAIL: review of a missing branch (exit $rc)"; echo "$out"; fails=1; }
+rc=0; out="$(cd "$TMP/host" && "$ROOT/bin/tartarus" review nobox x 2>&1)" || rc=$?
+[[ $rc == 1 && "$out" == *"no git remote sandbox-nobox"* ]] || { echo "FAIL: review of a missing sandbox (exit $rc)"; echo "$out"; fails=1; }
 rc=0; out="$(review escapes)" || rc=$?
 if [[ $rc != 2 || "$out" == *$'\033'* || "$out" == *$'\007'* || "$out" == *$'\302\233'* || "$out" != *"x?[2K.mk"* ]]; then
   echo "FAIL: review escapes (exit $rc)"; printf '%q\n' "$out"; fails=1
