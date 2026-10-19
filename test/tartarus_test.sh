@@ -44,7 +44,7 @@ DXR="$DX"; DX+=" --deny-network registry.npmjs.org"
 check "run claude" "sbx $R $DC claude ."
 check "run codex --name xy --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
   "sbx $R $DX --name xy --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
-check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit:latest copilot ."
+check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108 copilot ."
 export TARTARUS_REGISTRIES=1; check "run claude" "sbx $R --kit $ROOT/kits/registries $DC claude ."
 check "run codex" "sbx $R --kit $ROOT/kits/registries $DXR codex ."; unset TARTARUS_REGISTRIES
 check "run gemini" ""
@@ -98,7 +98,7 @@ for want in "sbx settings set ssh.agentForwardingEnabled false" "sbx settings se
   "sbx policy deny network *.prod.yourco.com" "sbx settings set kit.requireSignature true" "sbx daemon restart"; do
   grep -qxF "$want" "$TMP/log" || { echo "FAIL: setup missing: $want"; fails=1; }
 done
-grep -qF "sbx settings set kit.trustedSigners [{\"key\": \"$TMP/config/tartarus/kit-signing.pub\"}]" "$TMP/log" \
+grep -qF "sbx settings set kit.trustedSigners [{\"key\": \"$TMP/config/tartarus/kit-signing.pub\"}, {\"identity\": \"https://github.com/docker/sbx-kits-contrib/" "$TMP/log" \
   || { echo "FAIL: setup did not trust the pinned key"; fails=1; }
 
 out="$(TARTARUS_CPUS=2 TARTARUS_BASELINE_KIT="$ROOT/kits/team-baseline" "$ROOT/bin/tartarus" config)"

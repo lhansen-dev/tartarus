@@ -275,7 +275,7 @@ Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 with Claude Cod
 | Credentials passed in | Anything we give the sandbox is usable inside it | One model credential per harness; SSH forwarding off; no `github` secret (audited); no global registry secrets |
 | CI as a path to prod | A pushed branch may trigger deploys or expose prod secrets | Branch protection and a CI trigger audit (see Git workflow) |
 | Harness drift | Three harnesses change their flags, auth and defaults independently | Rely on `sbx`'s own per-agent defaults; Tartarus only picks the credential and kit |
-| Product maturity | Docker marks parts of `sbx` as Early Access or Experimental [18], [19], and it changes quickly (Copilot moved from a built-in agent to a kit [21]) | Pin kit versions; re-check Docker's docs quarterly |
+| Product maturity | Docker marks parts of `sbx` as Early Access or Experimental [18], [19], and it changes quickly (Copilot moved from a built-in agent to a kit [21]) | The Copilot kit is pinned by digest, and `setup` trusts the exact GitHub Actions identity that signs it (it isn't a `@docker.com` signer, so signed-kits-only setups refused it). The kit's own base image is still `:latest`. Re-check Docker's docs quarterly |
 | macOS version | Requires macOS Tahoe 26 or later [10] | Already required company-wide; confirm there are no exceptions |
 | Voluntary adoption | This is a team pattern, not enforced centrally | Easy defaults (`tartarus` launcher, shared kit) so the safe path is the easy one |
 

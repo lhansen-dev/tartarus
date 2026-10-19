@@ -1,2 +1,6 @@
 # Hosts the Copilot kit allows that tartarus closes per sandbox (sbx run --deny-network).
 # None yet; the file exists so its signature can be checked like the others.
+# Candidates, untested because they need a Copilot credential: github.com and api.github.com.
+# No GitHub credential is injected (audit forbids a github secret), but both take uploads with
+# any token the agent is fed (git push, gists). Codex works with them denied; check Copilot does
+# (it may use api.github.com for its token exchange), then add them here.

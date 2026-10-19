@@ -14,6 +14,14 @@ SIGNERS="$CONFIG/trusted-signers.json"                           # the full sign
 CPUS="${TARTARUS_CPUS:-4}"
 MEMORY="${TARTARUS_MEMORY:-8g}"
 
+# Keyless signers trusted besides the team key and sbx's own defaults: exact identities, no
+# regexps. Docker publishes its contributed kits, Copilot's among them, from this workflow.
+KEYLESS_SIGNERS='[{"identity": "https://github.com/docker/sbx-kits-contrib/.github/workflows/publish-artifact.yml@refs/heads/main", "issuer": "https://token.actions.githubusercontent.com"}]'
+# Kits run code in every sandbox, so a tag that moves under us isn't enough: pin the digest.
+# To update, check the new one first: sbx kit verify docker.io/sbx/copilot-kit@sha256:... \
+#   --certificate-identity <identity above> --certificate-oidc-issuer https://token.actions.githubusercontent.com
+COPILOT_KIT="docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108"
+
 # Host settings tartarus pins. `audit` fails if any drifts.
 SETTINGS=(
   ssh.agentForwardingEnabled=false  # 1Password's agent would hand over every key
@@ -73,7 +81,7 @@ indent() { while IFS= read -r line; do echo "          $line"; done <<<"$1"; }
 # claude --dangerously-skip-permissions, codex --dangerously-bypass-approvals-and-sandbox.
 harness_kit() {
   case "$1" in
-    copilot) echo "docker.io/sbx/copilot-kit:latest" ;;
+    copilot) echo "$COPILOT_KIT" ;;
     claude|codex) ;;
     *) die "unknown harness '$1' (copilot, claude, codex)" ;;
   esac
@@ -131,7 +139,7 @@ cmd_setup() {
     local signers  # an assignment, so a failure here stops setup instead of trusting nobody
     signers="$(sbx settings get kit.trustedSigners | python3 -c '
 import json, sys
-print(json.dumps(json.load(sys.stdin) + [{"key": sys.argv[1]}]))' "$PINNED_PUB")"
+print(json.dumps(json.load(sys.stdin) + [{"key": sys.argv[1]}] + json.loads(sys.argv[2])))' "$PINNED_PUB" "$KEYLESS_SIGNERS")"
     sbx settings set kit.trustedSigners "$signers"
     printf '%s\n' "$signers" > "$SIGNERS"
     sbx settings set kit.requireSignature true
