@@ -261,11 +261,11 @@ $report"
   denies="$(hosts_in "$ROOT/policy/deny-$harness.txt")"
   [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && denies="$(grep -vxF -f <(registry_hosts) <<<"$denies" || true)"
   while read -r host; do if [[ -n "$host" ]]; then args+=(--deny-network "$host"); fi; done <<<"$denies"
-  local paths=() rest=()
+  local paths=() rest=() name="" detach=""
   while (($#)); do
     case "$1" in
-      --name) [[ $# -ge 2 ]] || die "--name needs a value"; check_name "$2"; args+=(--name "$2"); shift 2 ;;
-      --detach|-d) args+=(--detach); shift ;;
+      --name) [[ $# -ge 2 ]] || die "--name needs a value"; check_name "$2"; name="$2"; shift 2 ;;
+      --detach|-d) detach=--detach; shift ;;
       --) shift; rest=("$@"); break ;;
       # sbx parses flags anywhere, so a stray --kit or --skills would reach it as a path.
       -*) die "unknown option $1 (prefix a path that starts with - with ./)" ;;
@@ -294,21 +294,29 @@ $report"
       *) paths[i]+=":ro" ;;
     esac
   done
-  # sbx ignores creation flags when it re-attaches to an existing sandbox, so the default name
-  # carries a fingerprint of everything it was created with: the lockdown config, the repo's
-  # full path (two repos named app must not share one) and every mount with its mode.
-  if [[ " ${args[*]} " != *" --name "* ]]; then
-    local fp mounts=("$primary")
-    for ((i = 1; i < ${#paths[@]}; i++)); do  # extras end in :ro here, or are read-write
-      if [[ "${paths[i]}" == *:ro ]]; then mounts+=("$(realpath -m "${paths[i]%:ro}"):ro"); else mounts+=("$(realpath -m "${paths[i]}"):rw"); fi
-    done
-    # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
-    fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/*/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
-      echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-} ${TARTARUS_REGISTRIES:-}"; printf '%s\n' "${mounts[@]}"; } | cksum | cut -d' ' -f1)"
+  # An existing sandbox keeps the config it was created with (sbx refuses creation flags on
+  # re-attach), so a fingerprint of all of it (the lockdown config, the repo's full path, every
+  # mount and its mode) goes in the default name, and is recorded for a --name, to check here.
+  local fp mounts=("$primary")
+  for ((i = 1; i < ${#paths[@]}; i++)); do  # extras end in :ro here, or are read-write
+    if [[ "${paths[i]}" == *:ro ]]; then mounts+=("$(realpath -m "${paths[i]%:ro}"):ro"); else mounts+=("$(realpath -m "${paths[i]}"):rw"); fi
+  done
+  # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
+  fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/*/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
+    echo "$harness $BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-} ${TARTARUS_REGISTRIES:-}"; printf '%s\n' "${mounts[@]}"; } | cksum | cut -d' ' -f1)"
+  if [[ -z "$name" ]]; then
     local base; base="$(basename "$primary")"
-    args+=(--name "tartarus-$harness-${base//[^A-Za-z0-9.-]/-}-$fp")  # sbx names: letters, digits, - and .
+    name="tartarus-$harness-${base//[^A-Za-z0-9.-]/-}-$fp"  # sbx names: letters, digits, - and .
   fi
-  args+=("$harness" "${paths[@]}")
+  local existing record="$CONFIG/sandboxes/$name"
+  existing="$(sbx ls --quiet)" || die "can't list sandboxes (sbx ls)"
+  if grep -qxF "$name" <<<"$existing"; then
+    [[ "$(cat "$record" 2>/dev/null)" == "$fp" ]] || die "sandbox $name exists with another config, or wasn't made by tartarus, and sbx would keep its old settings; tartarus rm $name, or use another --name"
+    args=(run --name "$name" ${detach:+"$detach"} "$harness")
+  else
+    mkdir -p "$CONFIG/sandboxes" && echo "$fp" > "$record"
+    args+=(--name "$name" ${detach:+"$detach"} "$harness" "${paths[@]}")
+  fi
   ((${#rest[@]})) && args+=(-- "${rest[@]}")
   exec sbx "${args[@]}"
 }
@@ -463,6 +471,7 @@ cmd_rm() {
   cmd_dismiss "$@"
   for name in "$@"; do
     sbx rm --force "$name"
+    rm -f "$CONFIG/sandboxes/$name"
     # sbx rm leaves the fetched refs behind in the host repo.
     if git rev-parse --git-dir >/dev/null 2>&1; then
       git for-each-ref --format='%(refname)' "refs/sandboxes/$name/" | while read -r ref; do git update-ref -d "$ref"; done

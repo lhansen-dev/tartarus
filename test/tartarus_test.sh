@@ -18,6 +18,7 @@ case "\$*" in
   "policy approval ls") cat "\$S/approvals" 2>/dev/null || echo HEADER; exit 0 ;;
   "kit verify "*) exit 0 ;;
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
+  "ls --quiet") cat "\$S/sandboxes" 2>/dev/null; exit 0 ;;
   "secret ls --quiet") [ -f "\$S/broken-secrets" ] && exit 1; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
@@ -168,6 +169,16 @@ name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/de
   grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log"; }
 n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 [[ -n "$n1" && "$n1" == "$n2" && "$n1" != "$n3" ]] || { echo "FAIL: fingerprint names: '$n1' '$n2' '$n3'"; fails=1; }
+# Re-attaching by --name needs the config the sandbox was made with; sbx would keep the old one.
+"$ROOT/bin/tartarus" run claude --name same "$TMP/a/app" >/dev/null 2>&1 || true
+echo same > "$TMP/state/sandboxes"
+check "run claude --name same $TMP/a/app -- -c" "sbx run --name same claude -- -c"  # re-attach: no creation flags
+check "run claude --name same $TMP/a/app $TMP/lib:rw" ""
+TARTARUS_ALLOW_ROOT=1 check "run claude --name same $TMP/a/app" ""
+echo other >> "$TMP/state/sandboxes"; check "run claude --name other $TMP/a/app" ""  # not made by tartarus
+"$ROOT/bin/tartarus" rm same >/dev/null 2>&1; [[ ! -e "$TMP/config/tartarus/sandboxes/same" ]] || { echo "FAIL: rm kept the record"; fails=1; }
+rm "$TMP/state/sandboxes"
+
 # Same basename elsewhere, or the same mount with another mode, is a different sandbox.
 name_args() { : > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$@" >/dev/null 2>&1 || true; grep -oE -- '--name [^ ]+' "$TMP/log"; }
 mkdir -p "$TMP/a/app" "$TMP/b/app" "$TMP/lib"
