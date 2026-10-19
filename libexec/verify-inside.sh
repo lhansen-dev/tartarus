@@ -74,6 +74,23 @@ echo "host surfaces"
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/1000}/wayland-0" ] || pgrep -f '^/usr/local/bin/clipboard-bridge' >/dev/null; then
   bad "clipboard bridge present"; else pass "no clipboard bridge"; fi
 if [ -n "$(ls -A /run/sbx/skills-shared 2>/dev/null)" ]; then bad "host skills shared in"; else pass "no host skills"; fi
+# The MCP gateway's mcp-find/mcp-add let any agent pull any server registered on the host into
+# its session at runtime, whatever the sandbox was created with. Its catalog must be empty.
+if [ -n "${MCP_GATEWAY_URL:-}" ]; then
+  mcp() { curl -q -s -m 15 -D "$1" -H "Authorization: Bearer ${MCP_SENTINEL_TOKEN_NAME:-}" ${sid:+-H "Mcp-Session-Id: $sid"} \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d "$2" "$MCP_GATEWAY_URL" 2>/dev/null; }
+  hdr="$(mktemp)"; sid=""
+  mcp "$hdr" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tartarus-verify","version":"1"}}}' >/dev/null
+  sid="$(sed -n 's/^[Mm]cp-[Ss]ession-[Ii]d: *//p' "$hdr" | tr -d '\r')"
+  mcp /dev/null '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
+  found="$(mcp /dev/null '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mcp-find","arguments":{"query":""}}}')"
+  rm -f "$hdr"
+  case "$found" in
+    *"No servers found"*) pass "MCP gateway offers no servers" ;;
+    *'"tools"'*|*'"result"'*) bad "MCP gateway offers servers to this agent (sbx mcp ls on the host)" ;;
+    *) echo "  warn  couldn't query the MCP gateway; check sbx mcp ls on the host" ;;
+  esac
+fi
 if [ -d /run/sandbox/source ]; then
   if touch /run/sandbox/source/.tartarus-write-test 2>/dev/null; then
     rm -f /run/sandbox/source/.tartarus-write-test; bad "host repo writable"
