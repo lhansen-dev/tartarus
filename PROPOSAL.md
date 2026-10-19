@@ -129,8 +129,10 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
    sbx run --clone --skills off --cpus 4 --memory 8g \
      --kit kits/team-baseline --kit kits/no-root \
      --deny-network <each host in policy/deny-<harness>.txt> \
-     --name tartarus-<harness>-<repo>-<fingerprint> \
-     <claude|codex|copilot-kit@sha256:...> [paths...] [-- agent args]   # Copilot's kit goes in the agent's place
+     --name tartarus-<harness>-<repo>-<fingerprint> --detach \
+     <claude|codex|copilot-kit@sha256:...> [paths...]   # Copilot's kit goes in the agent's place
+   # record the sandbox's allows (audit fails if they grow), then attach:
+   sbx run --name tartarus-<harness>-<repo>-<fingerprint> [-- agent args]
    ```
 
    In clone mode the agent works on a private in-VM clone, and the host repository is mounted read-only [18]. Arguments after `--` that start with `-` are added after the harness's autonomy flags; a bare word replaces them [28], [29].
