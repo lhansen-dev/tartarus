@@ -297,7 +297,10 @@ $report"
     holds_dotfiles "$extra" && die "extra path ${paths[i]} is or holds your home's dotfiles (keys, tokens); refused"
     refuse_exposed "$extra"
     case "${paths[i]}" in
-      *:rw) paths[i]="${paths[i]%:rw}" ;;
+      *:rw) paths[i]="${paths[i]%:rw}"
+        # A writable repo's .git takes hooks and core.fsmonitor, which run on the host at the next
+        # git status: hold it read-only on top (sbx mounts a :ro path inside a writable one).
+        [[ -e "$extra/.git" ]] && paths+=("$extra/.git:ro") ;;
       *:ro) ;;
       *) paths[i]+=":ro" ;;
     esac

@@ -52,6 +52,8 @@ check "run gemini" ""
 check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
 check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
 check "run claude ~/a ~/ab" "sbx $R $DC claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
+git init -q "$TMP/rwrepo"  # a writable repo keeps its .git read-only
+check "run claude ~/a $TMP/rwrepo:rw" "sbx $R $DC claude $HOME/a $TMP/rwrepo $TMP/rwrepo/.git:ro"
 check "run claude --kit evil ." ""        # unknown option: refused, not passed to sbx as a path
 check "run claude ~/a ~/.ssh" ""          # home dotdir: refused
 check "run claude /srv/a $HOME" ""        # all of home: refused
