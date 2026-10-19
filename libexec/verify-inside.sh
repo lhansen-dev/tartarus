@@ -56,6 +56,11 @@ for url in https://example.com http://example.com https://s3.amazonaws.com https
   code="$(http "$url")"
   case "$code" in 000|403) pass "blocked $url ($code)" ;; *) bad "reached $url ($code)" ;; esac
 done
+# Hosts tartarus denies on top of the harness kit (connectors, remote control, GitHub...).
+while read -r host; do
+  code="$(http "https://$host/")"
+  case "$code" in 000|403) pass "blocked $host ($code)" ;; *) bad "reached denied host $host ($code)" ;; esac
+done < /tmp/tartarus-blocked.txt
 for target in 1.1.1.1:443 8.8.8.8:53 169.254.169.254:80; do
   [ "$(tcp "${target%:*}" "${target#*:}")" = closed ] && pass "no direct TCP to $target" || bad "direct TCP to $target"
 done

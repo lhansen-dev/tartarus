@@ -55,7 +55,9 @@ harness_kit() {
   esac
 }
 
-deny_hosts() { [[ -f "$DENY_FILE" ]] && grep -Ev '^\s*(#|$)' "$DENY_FILE" || true; }
+# One host per line; blank lines and # comments (whole-line or trailing) are ignored.
+hosts_in() { [[ -f "$1" ]] && sed -e 's/#.*//' -e 's/[[:space:]]//g' "$1" | grep -v '^$' || true; }
+deny_hosts() { hosts_in "$DENY_FILE"; }
 
 cmd_setup() {
   local kv
@@ -112,6 +114,9 @@ cmd_run() {
   local kit; kit="$(harness_kit "$harness")"
   local args=(run --clone --skills off --cpus "$CPUS" --memory "$MEMORY" --kit "$BASELINE_KIT")
   [[ -n "$kit" ]] && args+=(--kit "$kit")
+  local host
+  # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
+  while read -r host; do args+=(--deny-network "$host"); done < <(hosts_in "$ROOT/policy/deny-$harness.txt")
   local paths=() rest=()
   while (($#)); do
     case "$1" in
@@ -124,6 +129,15 @@ cmd_run() {
   ((${#paths[@]})) || paths=(.)
   local i primary extra
   primary="$(realpath -m "${paths[0]}")"
+  # sbx ignores creation flags when it re-attaches to an existing sandbox, so the default name
+  # carries a fingerprint of the lockdown config: harden tartarus and you get a fresh sandbox.
+  if [[ " ${args[*]} " != *" --name "* ]]; then
+    local fp
+    # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
+    fp="$({ cat "$0" "$ROOT"/policy/*.txt; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
+      echo "$BASELINE_KIT $CPUS $MEMORY"; } | cksum | cut -d' ' -f1)"
+    args+=(--name "tartarus-$harness-$(basename "$primary")-$fp")
+  fi
   # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.
   for ((i = 1; i < ${#paths[@]}; i++)); do
     extra="$(realpath -m "${paths[i]%:r[ow]}")"
@@ -176,6 +190,10 @@ cmd_verify() {
   cmd_audit || fail=1
   mapfile -t ips < <(host_ips)
   sbx cp "$ROOT/libexec/verify-inside.sh" "$name:/tmp/tartarus-verify.sh" >/dev/null
+  # Every denied host must be blocked in any sandbox (wildcards can't be requested directly).
+  local blocked; blocked="$(mktemp)"
+  { deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' > "$blocked" || true
+  sbx cp "$blocked" "$name:/tmp/tartarus-blocked.txt" >/dev/null; rm -f "$blocked"
   sbx exec "$name" sh /tmp/tartarus-verify.sh "${ips[@]}" 127.0.0.1 || fail=1
   echo "Review egress with: sbx policy log $name"
   return "$fail"

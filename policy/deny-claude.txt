@@ -1,0 +1,7 @@
+# Hosts the Claude Code kit allows that tartarus closes per sandbox (sbx run --deny-network).
+# Claude still signs in and works with all of these blocked (tested with sbx v0.48.0).
+mcp-proxy.anthropic.com        # claude.ai MCP connectors: Gmail, Drive, etc. on the user's account
+bridge.claudeusercontent.com   # /remote-control bridge: an inbound channel to the agent
+downloads.claude.ai            # self-update downloads; keep the image's pinned binary
+claude.ai                      # web app; not needed by the CLI once signed in
+console.anthropic.com          # console; not needed by the CLI

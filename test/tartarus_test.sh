@@ -12,19 +12,22 @@ fails=0
 check() { # check "<tartarus args>" "<expected last sbx line>"
   : > "$TMP/log"
   eval "$ROOT/bin/tartarus $1" >/dev/null 2>&1 || true
-  local got; got="$(tail -n1 "$TMP/log")"
+  local got; got="$(tail -n1 "$TMP/log" | sed -E 's/ --name tartarus-[a-z]+-[^ ]+-[0-9]+//')"
   if [[ "$got" != "$2" ]]; then echo "FAIL: tartarus $1"; echo "  want: $2"; echo "  got:  $got"; fails=1; fi
 }
 
 R="run --clone --skills off --cpus 4 --memory 8g --kit KIT"
-check "run claude" "sbx $R claude ."
+DC="--deny-network mcp-proxy.anthropic.com --deny-network bridge.claudeusercontent.com"
+DC+=" --deny-network downloads.claude.ai --deny-network claude.ai --deny-network console.anthropic.com"
+DX="--deny-network github.com --deny-network api.github.com --deny-network codeload.github.com"
+check "run claude" "sbx $R $DC claude ."
 check "run codex --name x --detach ~/a ~/b ~/c:ro ~/d:rw -- -m o3" \
-  "sbx $R --name x --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
+  "sbx $R $DX --name x --detach codex $HOME/a $HOME/b:ro $HOME/c:ro $HOME/d -- -m o3"
 check "run copilot" "sbx $R --kit docker.io/sbx/copilot-kit:latest copilot ."
 check "run gemini" ""
 check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
 check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
-check "run claude ~/a ~/ab" "sbx $R claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
+check "run claude ~/a ~/ab" "sbx $R $DC claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
 check "setup" "sbx daemon restart"
@@ -35,6 +38,14 @@ for want in "sbx settings set ssh.agentForwardingEnabled false" "sbx settings se
   "sbx policy deny network *.prod.yourco.com" "sbx daemon restart"; do
   grep -qxF "$want" "$TMP/log" || { echo "FAIL: setup missing: $want"; fails=1; }
 done
+
+# Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
+name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true
+  grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log"; }
+n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
+[[ -n "$n1" && "$n1" == "$n2" && "$n1" != "$n3" ]] || { echo "FAIL: fingerprint names: '$n1' '$n2' '$n3'"; fails=1; }
+: > "$TMP/log"; "$ROOT/bin/tartarus" run claude --name mine . >/dev/null 2>&1 || true
+[[ "$(grep -o -- '--name [^ ]*' "$TMP/log")" == "--name mine" ]] || { echo "FAIL: explicit --name overridden"; fails=1; }
 
 # review: a local repo stands in for the sandbox's git remote.
 (

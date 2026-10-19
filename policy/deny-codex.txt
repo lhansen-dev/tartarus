@@ -1,0 +1,5 @@
+# Hosts the Codex kit allows that tartarus closes per sandbox (sbx run --deny-network).
+# Codex still signs in and works with all of these blocked (tested with sbx v0.48.0).
+github.com            # agents don't push; humans do, from the host
+api.github.com
+codeload.github.com
