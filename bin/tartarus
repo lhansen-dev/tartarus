@@ -568,6 +568,17 @@ except subprocess.TimeoutExpired: sys.exit("fetch took over 10 minutes")' git -c
   links="$(git diff --no-renames --raw "${range[@]}" \
     | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"} index($1, " 160000 ") {print $2 " (submodule)"}')"
   risky="$(printf '%s\n%s' "$risky" "$links" | sed '/^$/d')"
+  # Pushing is the one way out the network denies don't cover: a secret the agent read and wrote
+  # into a commit leaves with your push. Flag credential-shaped strings in added lines.
+  local leaks
+  leaks="$(git diff --no-ext-diff --no-textconv -U0 "${range[@]}" | python3 -c '
+import re, sys
+pat = re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY")
+f = ""
+for line in sys.stdin:
+    if line.startswith("+++ "): f = line[6:].rstrip("\n") if line.startswith("+++ b/") else ""
+    elif line.startswith("+") and pat.search(line): print(f + " (credential-shaped string)")' | sort -u)"
+  risky="$(printf '%s\n%s' "$risky" "$leaks" | sed '/^$/d')"
   # The list only covers files that run on their own. Running tests or the app runs every changed file.
   local after="Every changed file runs once you test, build or start the app on the host: read the whole
 diff first, or run them in the sandbox (sbx exec -it $name bash).
@@ -578,7 +589,7 @@ Reviewed $tip. Take exactly that commit, not the branch, which moves on the next
     printf '%s\n' "$risky" | sed 's/^/  /'
     # Shell-quoted: the names are the agent's. :(literal) stops git reading them as pathspec magic.
     local f quoted=()
-    while IFS= read -r f; do quoted+=("$(printf '%q' ":(literal)${f% (symlink)}")"); done <<<"$(sed 's/ (submodule)$//' <<<"$risky")"
+    while IFS= read -r f; do quoted+=("$(printf '%q' ":(literal)${f% (symlink)}")"); done <<<"$(sed -e 's/ (submodule)$//' -e 's/ (credential-shaped string)$//' <<<"$risky" | sort -u)"
     echo; echo "See just those changes: git diff ${base:0:12} ${tip:0:12} -- ${quoted[*]}"
     echo; echo "$after"
     return 2
