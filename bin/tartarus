@@ -60,7 +60,8 @@ Usage: tartarus <command> [args]
                                 are mounted read-only; suffix one with :rw to make it writable.
                                 Refuses paths holding home dotfiles, untracked secret-looking
                                 files (.env, *.pem...) or credentials in .git/config.
-  verify <sandbox-name>         Run audit, then the in-sandbox battery: secrets, host surfaces, egress
+  verify [sandbox-name...]      Run audit, then the in-sandbox battery: secrets, host surfaces, egress
+                                (no name: every sandbox tartarus made)
   review <sandbox-name> <branch>
                                 Fetch the agent's branch to the host without checking it out, and flag
                                 changed files that run code on the host (hooks, CI, IDE tasks, builds).
@@ -679,8 +680,13 @@ host_ips() {
 }
 
 cmd_verify() {
-  local name="${1:-}"; [[ -n "$name" ]] || die "verify needs a sandbox name"
-  check_name "$name"
+  local names=("$@") name
+  # No name: every running or stopped sandbox tartarus made.
+  if ((${#names[@]} == 0)); then
+    while read -r name; do [[ -n "$name" && -f "$CONFIG/sandboxes/$name" ]] && names+=("$name"); done < <(sbx ls --quiet)
+    ((${#names[@]})) || die "no sandboxes made by tartarus to verify"
+  fi
+  for name in "${names[@]}"; do check_name "$name"; done
   local fail=0 ips
   cmd_audit || fail=1
   local policy; mapfile -t policy < <(policy_files)
@@ -692,8 +698,11 @@ cmd_verify() {
   blocked="$({ deny_hosts; for f in "$ROOT"/policy/deny-*.txt; do hosts_in "$f"; done; } | grep -v '\*' | grep -vxF -f <(registry_hosts) || true)"
   # The script goes in as an argument, not a file: the agent can rewrite anything it can write.
   # As root: the agent's own processes could ptrace one running as the agent.
-  sbx exec -u root "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
-  echo "Review egress with: sbx policy log $name"
+  for name in "${names[@]}"; do
+    ((${#names[@]} == 1)) || echo "== $name"
+    sbx exec -u root "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
+    echo "Review egress with: sbx policy log $name"
+  done
   return "$fail"
 }
 
