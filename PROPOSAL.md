@@ -36,7 +36,9 @@ Every agent session runs in `sbx`, whatever the task and whatever the harness. T
 | Claude Code | `claude` | `claude --dangerously-skip-permissions` [28] | `/login` OAuth inside the sandbox, or `anthropic` API key [22] | none |
 | Codex | `codex` | `codex --dangerously-bypass-approvals-and-sandbox` [29] | `openai` via `--oauth` on the host [22] | none |
 
-Adding another `sbx`-supported harness (Gemini, Cursor, OpenCode and others [30]) is one `case` arm in `bin/tartarus`.
+Adding another `sbx`-supported harness (Gemini, Cursor, OpenCode and others [30]) takes one `case` arm in `bin/tartarus` and a `policy/deny-<harness>.txt`.
+
+Claude Code and Codex have been tested end to end under the full lockdown. Copilot is wired the same way but not yet tested: no Copilot account was available. Its kit allows `github.com` and `api.github.com`, so check `sbx policy log` during the pilot and add a `policy/deny-copilot.txt` for anything it doesn't need.
 
 ### VS Code
 
@@ -46,7 +48,7 @@ VS Code connects to a sandbox over Remote-SSH, so the editor stays on the host w
 2. Create a sandbox for the project: `sbx create --name <project> shell .`
 3. In VS Code, run **Remote-SSH: Connect to Host…** and enter `<project>.sbx`, then open the mounted workspace with the remote folder picker [14].
 
-The network policy must allow Microsoft's VS Code download domains and the harness's endpoints, because the first connection installs the VS Code server inside the sandbox [14]. On macOS, if VS Code loops on reconnect, set `remote.SSH.useLocalServer` to `false` [14].
+The network policy must allow Microsoft's VS Code download domains and the harness's endpoints, because the first connection installs the VS Code server inside the sandbox [14]. Under Tartarus's `deny-all` policy, that means adding those domains to the baseline kit; this path hasn't been tested yet. On macOS, if VS Code loops on reconnect, set `remote.SSH.useLocalServer` to `false` [14].
 
 - [ ] Confirm our macOS Tahoe 26+ requirement covers every developer Mac, since `sbx` needs it [10].
 
@@ -54,7 +56,12 @@ The network policy must allow Microsoft's VS Code download domains and the harne
 
 `sbx` puts the whole agent in a separate microVM with its own kernel, Docker daemon, filesystem, and network [4], [5]. By default it can't reach the host filesystem outside the workspace, the host Docker daemon, the host network or localhost, or other sandboxes, and these can't be unblocked by policy [17]. Copilot CLI, Claude Code and Codex are all supported agents [30], so one boundary covers every harness.
 
-One host connection is on by default: if `SSH_AUTH_SOCK` is set, the host SSH agent is forwarded into the sandbox [22]. `tartarus setup` turns that off.
+`sbx`'s defaults still leave several doors open, all found and closed during testing with `sbx` v0.48.0 (see Lockdown layers):
+- the host SSH agent is forwarded [22];
+- the `balanced` network policy allows about 190 destinations;
+- the agent has passwordless `sudo` in the VM;
+- a clipboard bridge to the host is running;
+- the Claude kit can reach your claude.ai connectors.
 
 | | Harness built-in sandbox (GHCP shown) | Docker Sandboxes (`sbx`) |
 |---|---|---|
@@ -62,7 +69,7 @@ One host connection is on by default: if `SSH_AUTH_SOCK` is set, the host SSH ag
 | What's isolated | Most commands the agent runs; the agent runs on the host [1] | Everything, including the agent |
 | What the agent sees | Your real filesystem, minus the policy | Only the mounted project folder |
 | Credentials | Git and GitHub credentials passed through by default [1] | Held on the host and added by a proxy; never enter the VM [8], [22] |
-| Network | Configurable | Deny-by-default proxy on the host; raw TCP, UDP, and ICMP blocked; private IP ranges, loopback, and link-local blocked [17] |
+| Network | Configurable | Host-side proxy. Tartarus sets `deny-all`, so each sandbox reaches only its harness vendor's API plus npm and PyPI. Raw TCP, UDP and ICMP are blocked, as are private IP ranges, loopback and link-local addresses [17] |
 | Escape hatch | Can request to run one command outside [1] | None built in |
 | Same model for every harness | No, each harness has its own | Yes |
 | Requirements | Built into the harness, free | macOS Tahoe 26+ on Macs; Docker Desktop not required [6], [10] |
@@ -71,81 +78,76 @@ In short: a harness sandbox is a fence inside your house, and `sbx` is a separat
 
 ## Team setup
 
-Setup is four commands per machine, plus the `tartarus` repo the team maintains in git: `bin/tartarus` (the launcher), `kits/team-baseline/` (the shared kit) and `policy/deny.txt` (prod hostnames).
+Setup is four commands per machine, plus the `tartarus` repo the team maintains in git:
+- `bin/tartarus`: the launcher;
+- `kits/`: the signed shared kits;
+- `policy/`: prod hostnames and per-harness deny lists.
 
 1. **Install `sbx` and sign in** [4]:
    - macOS: `brew install docker/tap/sbx`
    - Ubuntu: `sudo apt-get install docker-sbx` (after adding Docker's repo)
-   - Then: `sbx login`, and put `tartarus/bin` on your `PATH`.
-2. **Harden the host connections and set the network policy once:** `tartarus setup`. It runs:
+   - Then: `sbx login`, and put `tartarus/bin` on your `PATH`. `sbx` requires a Docker sign-in even for local sandboxes.
+2. **Harden the machine:** `tartarus setup`. It rebuilds `sbx`'s host configuration from scratch, so it's safe to re-run:
 
    ```bash
-   sbx settings set ssh.agentForwardingEnabled false
-   sbx settings set kit.allowedSources '["docker.io/sbx/","github.com/yourorg/"]'
-   sbx policy init balanced
+   sbx settings set ssh.agentForwardingEnabled false   # plus clipboard, remote control, skills: see Lockdown layers
+   sbx settings set kit.allowedSources '["docker.io/sbx/"]'
+   sbx policy reset --force && sbx policy init deny-all
    sbx policy deny network "<each host in policy/deny.txt>"
+   sbx settings set kit.trustedSigners '[<Docker>, {"key": "~/.config/tartarus/kit-signing.pub"}]'
+   sbx settings set kit.requireSignature true
+   sbx daemon restart                                  # ssh.* settings only apply after this
    ```
 
-   SSH agent forwarding is on by default [22], and with 1Password's SSH agent it would hand the sandbox every key we hold. The setting is documented alongside Docker's signing kit [26]. If a team needs signed agent commits, run an isolated SSH agent loaded only with an agent-only key [25]. Restricting kit sources limits which kits can run [8], since kits execute code in the sandbox; `kit.allowedSources` replaces the whole list [27], and `TARTARUS_KIT_SOURCES` overrides ours.
+   - **SSH forwarding:** it's on by default [22], and with 1Password's SSH agent it would hand the sandbox every key we hold. If a team needs signed agent commits, run an isolated SSH agent loaded only with an agent-only key [25].
+   - **Network:** under `deny-all`, the global policy allows nothing. Each sandbox gets only its harness kit's vendor endpoints plus the baseline kit's npm and PyPI [9], [11]. Private IP ranges, loopback and link-local addresses are blocked regardless [17]. `policy/deny.txt` is for prod endpoints with public addresses, such as public APIs and cloud control planes.
+   - **Kits:** only kits signed by the team key, plus Docker's own, can be installed. Kits run code inside the sandbox [8].
 
-   Private IP ranges, loopback, and link-local addresses are blocked for every sandbox [17], so internal services on private addresses are already unreachable. Deny rules are for prod endpoints with public addresses, such as public APIs and cloud control planes [9]. `balanced` includes broad wildcards [11], [16]; once the pilot shows which domains are actually used, move to `deny-all` with explicit allows.
+   `tartarus audit` checks all of this at any time, and `tartarus verify` runs it automatically.
 3. **Give the sandbox only the model credential:** `tartarus login <harness>`.
-   - **Copilot:** stores only the `copilot` secret (`COPILOT_GITHUB_TOKEN`, injected for `*.githubcopilot.com` and `copilot.github.com`). We deliberately skip the kit's `github` secret (`GH_TOKEN`, injected for `github.com`) [21]: our code lives on our own GitHub server, and the agent shouldn't push anywhere.
+   - **Copilot:** stores only the `copilot` secret (`COPILOT_GITHUB_TOKEN`, injected for `*.githubcopilot.com` and `copilot.github.com`). We deliberately skip the kit's `github` secret (`GH_TOKEN`, injected for `github.com`) [21]: our code lives on our own GitHub server, and the agent shouldn't push anywhere. `audit` fails if a `github` secret is ever stored.
    - **Claude Code:** sign in with `/login` inside the sandbox (OAuth, token stays on the host), or store an API key with `sbx secret set anthropic` [22], [28].
    - **Codex:** `sbx secret set openai --oauth` signs in on the host and keeps the tokens in the OS keychain [29].
 
-   The proxy adds the credential to matching requests, and the sandbox only ever sees a sentinel value [22].
-4. **Run the agent in clone mode with the kits:** `tartarus run <harness>`, which runs:
+   The proxy adds the credential to matching requests. Inside the sandbox, Claude's `.credentials.json` and Codex's `auth.json` hold only placeholder values (checked by `verify`) [22].
+4. **Run the agent:** `tartarus run <harness>`, which runs:
 
    ```bash
-   sbx run --clone \
-     --kit "$TARTARUS_BASELINE_KIT" \
-     [--kit "docker.io/sbx/copilot-kit:latest"]   # copilot only
+   sbx run --clone --skills off --cpus 4 --memory 8g \
+     --kit kits/team-baseline --kit kits/no-root \
+     [--kit docker.io/sbx/copilot-kit:latest]           # copilot only
+     --deny-network <each host in policy/deny-<harness>.txt> \
+     --name tartarus-<harness>-<repo>-<lockdown fingerprint> \
      <copilot|claude|codex> [paths...] [-- agent args]
    ```
 
-   In clone mode the agent works on a private in-VM clone, and the host repository is mounted read-only [18]. Arguments after `--` that start with `-` are added after the harness's autonomy flags; a bare word replaces them [28], [29]. Docker is moving Copilot from a built-in agent to a kit; older `sbx` versions use plain `sbx run copilot` [21].
+   In clone mode the agent works on a private in-VM clone, and the host repository is mounted read-only [18]. Arguments after `--` that start with `-` are added after the harness's autonomy flags; a bare word replaces them [28], [29].
+
+   The default name ends in a fingerprint of the launcher, kits and policies. `sbx` ignores creation flags when it re-attaches to an existing sandbox, so without the fingerprint, a hardening change would silently not apply to a sandbox you already have. With it, any such change gives you a fresh sandbox.
 
 Sandboxes don't pick up user-level harness config such as `~/.claude` or `~/.codex`; only project-level config in the workspace is visible [28], [29]. Shared agent instructions (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`) therefore belong in the repo, or in the baseline kit's `files/home/`.
 
 ### Multi-repo work
 
-Mount the repo being changed plus only the repos it needs, read-only where possible, rather than all of `~/Dev`:
+Mount the repo being changed plus only the repos it needs, rather than all of `~/Dev`:
 
 ```bash
-tartarus run claude ~/Dev/web-app ~/Dev/shared-lib ~/Dev/api-docs:ro
+tartarus run claude ~/Dev/web-app ~/Dev/shared-lib ~/Dev/api-docs
 ```
 
-Extra paths are mounted at the same location as on the host, and `:ro` makes them read-only [23]. Clone mode only protects the primary repository; extra workspaces stay direct-mounted and writable unless marked `:ro` [27].
+Extra paths are mounted at the same location as on the host [23]. Clone mode only protects the primary repository; extra workspaces are direct mounts [27].
+- `tartarus` mounts extras read-only unless you add `:rw` to the path.
+- It refuses an extra path that contains, or sits inside, the primary repo, because that would mount the repo directly and bypass clone mode.
 
-### The shared baseline kit
+### The shared kits
 
-A kit is a `spec.yaml` that adds tools, credentials, network rules, and files to a sandbox at runtime [8], [12]. The baseline is a `mixin`, so it layers onto any harness. Teams should point `TARTARUS_BASELINE_KIT` at the pinned git copy, so we can update it without breaking anyone [8]:
+A kit is a `spec.yaml` that adds tools, credentials, network rules, and files to a sandbox at runtime [8], [12]. Both kits are mixins, so they layer onto any harness:
+- **`kits/team-baseline`:** the team's network allowlist (npm and PyPI). It also removes the in-VM end of the host clipboard bridge.
+- **`kits/no-root`:** removes the agent's passwordless `sudo` and locks the Docker socket to root. `TARTARUS_ALLOW_ROOT=1` opts out.
 
-```bash
-export TARTARUS_BASELINE_KIT="git+https://github.com/yourorg/tartarus.git#ref=v1&dir=kits/team-baseline"
-```
+After any kit change, run `tartarus sign-kits`. It validates and signs every kit with the team key, which it creates on first use under `~/.config/tartarus/`, outside the repo. Then commit `kits/signing.pub` and the `kit.sig.bundle` files. If a kit changes without being re-signed, `sbx` refuses to install it and `audit` reports it.
 
-```yaml
-# kits/team-baseline/spec.yaml
-schemaVersion: "2"
-kind: mixin
-name: team-baseline
-description: Team defaults for running AI coding agents in sbx
-
-permissions:
-  network:
-    allow:
-      - registry.npmjs.org
-      - pypi.org
-      - files.pythonhosted.org
-
-setup:
-  install:
-    - command: "apt-get update && apt-get install -y jq"
-```
-
-Validate changes with `sbx kit validate ./kits/team-baseline` before publishing. Put shared config under `files/home/`, not `files/workspace/`, because kit files overwrite existing files and the workspace is the person's repo [8].
+Teams can also point `TARTARUS_BASELINE_KIT` at a pinned git copy (`git+https://github.com/yourorg/tartarus.git#ref=v1&dir=kits/team-baseline`) and add that source to `TARTARUS_KIT_SOURCES` [8]. Put shared config under `files/home/`, not `files/workspace/`, because kit files overwrite existing files and the workspace is the person's repo [8].
 
 ## Git workflow
 
@@ -154,12 +156,22 @@ Agents commit inside the sandbox; humans review and push from the host. We reach
 Clone mode makes the handoff safe. The agent's commits are exposed to the host through a `sandbox-<name>` Git remote [18], while credentials, signing keys, and `.git/config` stay on the host [18]. The agent can't modify any tracked file or anything under `.git/` on the host, so it can't plant a `.git/hooks/pre-commit` or alter `.github/workflows/` [18].
 
 ```bash
-git fetch sandbox-<name>
-git log main..sandbox-<name>/<branch>
-git diff main...sandbox-<name>/<branch>
+tartarus review <sandbox-name> <branch>   # fetch, log, diffstat, and flag files that run on the host
+git branch <branch> sandbox-<sandbox-name>/<branch>
+tartarus rm <sandbox-name>                # remove the sandbox and the refs sbx leaves behind
 ```
 
-Fetching isn't approval. Before checking out, building, or opening the branch in an IDE, review the files that execute code during normal development: Git hooks, CI configuration, IDE task configs, build scripts, and harness config that runs commands (`.claude/settings.json` hooks, `.codex/`, Copilot instructions) [19]. Then push the branch to our server as usual.
+Fetching isn't approval. Before checking out, building, or opening the branch in an IDE, review the files that execute code during normal development [19]. `tartarus review` lists every changed file of that kind and exits 2 when there are any. It covers:
+- Git hooks and attributes;
+- CI configuration;
+- IDE and devcontainer config;
+- build and task files;
+- dependency manifests;
+- environment managers such as `direnv`, `mise` and Nix;
+- harness config that runs commands (`.claude/`, `.codex/`, `.mcp.json`);
+- agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`). These are prompt injection aimed at the next agent you run on the host, outside the sandbox.
+
+Then push the branch to our server as usual.
 
 ### Server-side guardrails
 
@@ -195,17 +207,40 @@ env -i HOME="$HOME" PATH="$PATH" TERM="$TERM" KUBECONFIG=/dev/null <harness comm
 
 with each harness's own sandbox switched on: `copilot --sandbox`, `codex --sandbox workspace-write`, and `claude` with its default permission prompts. This drops `VAULT_TOKEN`, `AWS_*`, `SSH_AUTH_SOCK`, and anything injected by `op run`, and gives `kubectl` no clusters. It keeps `HOME`, so the harness's own sign-in still works, but so does the agent's view of `~/.vault-token`, which is why `sbx` stays the default.
 
+## Lockdown layers
+
+Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 with Claude Code and Codex. Each check also has a control: the same probe with the protection removed, to prove the check can fail. `tartarus verify <sandbox>` re-runs the in-sandbox checks, and `tartarus audit` the host ones.
+
+| Layer | What it stops | How it was proven |
+|---|---|---|
+| `deny-all` global policy | `balanced` allows about 190 destinations, including `**.amazonaws.com`, `**.googleapis.com`, GitHub and GitLab: ready-made exfiltration paths | `example.com`, S3, GCS, GitLab, pastebin and the cloud metadata IP all return 403 from the proxy. Direct TCP to the internet or to the host's LAN or VPN addresses is accepted by the interceptor but returns no data. Direct UDP, direct IPv6, and DNS for public names are blocked |
+| Per-harness deny lists | The Claude kit allows `mcp-proxy.anthropic.com`, which reaches your claude.ai connectors (Gmail, Drive and so on) with your subscription. It also allows the remote-control bridge and self-update. The Codex kit allows GitHub | The policy log showed Claude contacting the connector proxy during a trivial task. With all of these denied, both agents still sign in, run tests and commit |
+| SSH agent forwarding off, with a daemon restart | A host SSH agent, such as 1Password's, would be usable inside | A live throwaway agent on the host was invisible in the sandbox. With forwarding on, as a control, its key showed up |
+| Host environment never passed in | Vault, AWS and 1Password variables in the launching shell | Canary values exported in the launching shell were absent from every process environment inside |
+| Credentials stay on the host | Real OAuth or API tokens inside the VM | The credential files hold only proxy placeholders. A token scan in `verify` flags JWT, `sk-` and `gh*_` shapes (it caught a planted fake) |
+| No root for the agent (`no-root` kit) | Guest root is the first step of any attack on the VM boundary | `sudo` asks for a password (the agent's is locked), and `docker ps` is denied. `sbx exec` re-adds the `sudo` and `docker` groups to every session, so the control is on the grants themselves. Holds across restarts |
+| Clipboard bridge removed | The image runs `clipboard-bridge`, a Wayland clipboard-control server bridged towards the host | The bridge process and socket are gone after start and after restart. `clipboard.imagePaste=false` is pinned on the host as well |
+| Host skills off | The host skills store linked into every sandbox | `--skills off` and `skills.defaultMode=off` |
+| Clone mode plus read-only extras | The agent writing the host repo, its hooks or its config | The host repo's working tree, `.git/hooks` and `HEAD` were unchanged after agent commits, and writing to the source mount fails. Extras default to `:ro`, and overlapping mounts are refused |
+| Fingerprinted sandbox names | Re-attaching to an older sandbox, where `sbx` silently ignores the new flags | `verify` on a sandbox from before the deny lists fails: the connector proxy is reachable there |
+| Signed kits | A modified kit, which runs code in every sandbox | Signed kits install. After a one-line edit without re-signing, `sbx` and `audit` both refuse |
+| Approval prompts | Each blocked request becomes a pending prompt, and one click saves a permanent allow. An agent can trigger prompts on purpose | `audit` fails on any allow created by an approval (tested by approving `example.org` on a probe). Dismiss prompts, never allow them |
+| No registered MCP servers | The sandbox MCP gateway is a daemon alias that deny rules don't cover. A registered host stdio server would run commands on the host for any agent | Denying the gateway had no effect, so the control is on the host: `audit` fails if `sbx mcp ls` lists anything |
+| Resource limits | A runaway agent starving the host | 4 CPUs and 8 GB by default (`TARTARUS_CPUS`, `TARTARUS_MEMORY`) |
+
 ## Risks and limitations
 
 `sbx` removes the host from the blast radius, but these gaps remain.
 
 | Risk | Why it matters | Mitigation |
 |---|---|---|
-| Trust handoff | Pillar Security found sandbox bypasses in four major coding agents where the agent never broke the sandbox; it wrote files that host tools later trusted [24] | Clone mode for the primary repo; review hooks, CI config, IDE tasks, build scripts and harness config before building or opening agent work [19] |
-| Writable extra workspaces | Extra mounts stay direct and writable, even in clone mode [27] | Mount extras with `:ro`; never mount all of `~/Dev` |
+| Trust handoff | Pillar Security found sandbox bypasses in four major coding agents where the agent never broke the sandbox; it wrote files that host tools later trusted [24] | Clone mode for the primary repo; `tartarus review` before building or opening agent work [19] |
+| Writable extra workspaces | Extra mounts stay direct and writable, even in clone mode [27] | `tartarus` mounts extras `:ro` unless told `:rw`; never mount all of `~/Dev` |
+| The vendor API is an open channel | The agent must reach its own model API, and with OAuth it acts as you there (for example, Codex reaches `chatgpt.com`) | Inherent to running the agent at all. Deny everything else (done), and prefer API keys scoped to a team project over personal subscriptions |
+| Persistent sandboxes | A sandbox, including anything a compromised agent planted in its home, persists across sessions for the same repo and lockdown | `tartarus rm` after merging work; a fresh sandbox per task for untrusted inputs |
 | Public prod endpoints | Private ranges are blocked [17], but public prod APIs and cloud control planes are reachable if a rule allows them | `policy/deny.txt`; review `sbx policy log` |
-| Broad default allowlist | `balanced` includes broad wildcards [16], which are paths for exfiltrating code | Move to `deny-all` plus explicit allows after the pilot |
-| Credentials passed in | Anything we give the sandbox is usable inside it | One model credential per harness; SSH forwarding off; no global registry secrets |
+| Allowlist creep | Every domain added to the kits, and every approved prompt, is a possible exfiltration path [16] | Keep `team-baseline` short. `audit` fails on approval-created allows |
+| Credentials passed in | Anything we give the sandbox is usable inside it | One model credential per harness; SSH forwarding off; no `github` secret (audited); no global registry secrets |
 | CI as a path to prod | A pushed branch may trigger deploys or expose prod secrets | Branch protection and a CI trigger audit (see Git workflow) |
 | Harness drift | Three harnesses change their flags, auth and defaults independently | Rely on `sbx`'s own per-agent defaults; Tartarus only picks the credential and kit |
 | Product maturity | Docker marks parts of `sbx` as Early Access or Experimental [18], [19], and it changes quickly (Copilot moved from a built-in agent to a kit [21]) | Pin kit versions; re-check Docker's docs quarterly |
@@ -219,7 +254,7 @@ For teams that want an even stronger boundary, cloud sandboxes such as GHCP's cl
 Start with one volunteer team, prove the pattern, then share it.
 
 1. **Pilot:** one team runs all agent sessions, whichever harness each person prefers, through `tartarus run` for real work. Publish the kit and `policy/deny.txt` in this repo.
-2. **Verify:** `tartarus verify <sandbox-name>` confirms the sandbox shows no host secrets in `env`, no SSH agent (`ssh-add -l`), and no kube context. Review `sbx policy log` to confirm nothing unexpected was contacted. Repeat for each harness in use.
+2. **Verify:** `tartarus verify <sandbox-name>` runs the host audit and the in-sandbox battery (see Lockdown layers). Review `sbx policy log` to confirm nothing unexpected was contacted. Repeat for each harness in use.
 3. **Git:** adopt the clone-mode review flow, turn on branch protection, and run the CI trigger audit.
 4. **Share:** demo the pattern to other teams, with this repo as the starting point.
 5. **Iterate:** collect friction (blocked domains, missing tools, harness quirks) and fold fixes into the kit or launcher.
