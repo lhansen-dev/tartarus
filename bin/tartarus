@@ -6,6 +6,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASELINE_KIT="${TARTARUS_BASELINE_KIT:-$ROOT/kits/team-baseline}"
 KIT_SOURCES="${TARTARUS_KIT_SOURCES:-[\"docker.io/sbx/\"]}"
 DENY_FILE="${TARTARUS_DENY_FILE:-$ROOT/policy/deny.txt}"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/tartarus"
+SIGNING_KEY="${TARTARUS_SIGNING_KEY:-$CONFIG/kit-signing.key}"  # private; never in the repo
+REPO_PUB="$ROOT/kits/signing.pub"                                # published with the kits
+PINNED_PUB="$CONFIG/kit-signing.pub"                             # what setup told sbx to trust
 CPUS="${TARTARUS_CPUS:-4}"
 MEMORY="${TARTARUS_MEMORY:-8g}"
 
@@ -36,12 +40,14 @@ Usage: tartarus <command> [args]
                                 Fetch the agent's branch to the host without checking it out, and flag
                                 changed files that run code on the host (hooks, CI, IDE tasks, builds).
                                 Exits 2 when any are found.
+  sign-kits                     Sign kits/*/ with the team key (made on first use, kept outside the
+                                repo); commit kits/signing.pub and the kit.sig.bundle files
   rm <sandbox-name>...          Remove sandboxes and the refs/sandboxes/<name>/* refs sbx keeps in
                                 this repo. Branch anything you want first: git branch X sandbox-<name>/Y
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
-Env: TARTARUS_ALLOW_ROOT=1 (keep sudo/Docker for the agent), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
+Env: TARTARUS_SIGNING_KEY, TARTARUS_ALLOW_ROOT=1 (keep sudo/Docker for the agent), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
 EOF
 }
 
@@ -70,6 +76,20 @@ cmd_setup() {
   sbx policy reset --force
   sbx policy init deny-all
   deny_hosts | while read -r host; do sbx policy deny network "$host"; done
+  # With a team key, only kits it signed (plus Docker's built-in agents) can be installed. The
+  # key is pinned outside the repo, so a changed signing.pub needs a deliberate re-run of setup.
+  if [[ -f "$REPO_PUB" ]]; then
+    mkdir -p "$CONFIG" && cp "$REPO_PUB" "$PINNED_PUB"
+    sbx settings unset kit.trustedSigners >/dev/null 2>&1 || true
+    local signers  # an assignment, so a failure here stops setup instead of trusting nobody
+    signers="$(sbx settings get kit.trustedSigners | python3 -c '
+import json, sys
+print(json.dumps(json.load(sys.stdin) + [{"key": sys.argv[1]}]))' "$PINNED_PUB")"
+    sbx settings set kit.trustedSigners "$signers"
+    sbx settings set kit.requireSignature true
+  else
+    echo "tartarus: no kits/signing.pub; kit signatures not enforced (see: tartarus sign-kits)"
+  fi
   # ssh.* settings only reach the daemon after a restart; this stops running sandboxes.
   sbx daemon restart
 }
@@ -103,6 +123,15 @@ print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if 
     [[ -z "$host" ]] && continue
     sbx policy ls --json | grep -qF "\"$host\"" || { echo "  FAIL  deny rule missing: $host"; fail=1; }
   done < <(deny_hosts)
+  if [[ -f "$REPO_PUB" ]]; then
+    [[ "$(sbx settings get kit.requireSignature)" == true ]] || { echo "  FAIL  kit.requireSignature is off"; fail=1; }
+    cmp -s "$REPO_PUB" "$PINNED_PUB" || { echo "  FAIL  kits/signing.pub differs from the key setup pinned ($PINNED_PUB)"; fail=1; }
+    local kit
+    for kit in "$ROOT"/kits/*/; do
+      sbx kit verify --key "$PINNED_PUB" "$kit" >/dev/null 2>&1 \
+        || { echo "  FAIL  $(basename "$kit") kit signature missing or stale (tartarus sign-kits)"; fail=1; }
+    done
+  fi
   # Every sandbox reaches the MCP gateway (a daemon alias that deny rules don't cover), so any
   # registered server is exposed to every agent; host stdio servers run commands on the host.
   local mcp; mcp="$(sbx mcp ls 2>&1 || true)"
@@ -196,6 +225,20 @@ cmd_review() {
   echo; echo "No files that execute on the host changed. Still review the diff before merging."
 }
 
+cmd_sign_kits() {
+  if [[ ! -f "$SIGNING_KEY" ]]; then
+    mkdir -p "$(dirname "$SIGNING_KEY")"
+    (umask 077 && openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$SIGNING_KEY")
+    openssl pkey -in "$SIGNING_KEY" -pubout -out "$REPO_PUB"
+    echo "tartarus: new signing key $SIGNING_KEY; public key in kits/signing.pub"
+  fi
+  local kit
+  for kit in "$ROOT"/kits/*/; do
+    sbx kit validate "$kit" && sbx kit sign --key "$SIGNING_KEY" "$kit"
+  done
+  echo "tartarus: commit kits/signing.pub and kits/*/kit.sig.bundle, then run tartarus setup"
+}
+
 cmd_rm() {
   local name
   (($#)) || die "rm needs one or more sandbox names"
@@ -253,6 +296,7 @@ case "${1:-}" in
   verify) shift; cmd_verify "$@" ;;
   review) shift; cmd_review "$@" ;;
   rm) shift; cmd_rm "$@" ;;
+  sign-kits) shift; cmd_sign_kits "$@" ;;
   safe) shift; cmd_safe "$@" ;;
   ""|-h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;

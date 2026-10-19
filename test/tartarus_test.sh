@@ -4,9 +4,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-printf '#!/bin/sh\necho "sbx $*" >> "%s/log"\n' "$TMP" > "$TMP/sbx"
+printf '#!/bin/sh\necho "sbx $*" >> "%s/log"\ncase "$*" in "settings get kit.trustedSigners") echo "[]" ;; esac\n' "$TMP" > "$TMP/sbx"
 chmod +x "$TMP/sbx"
-export PATH="$TMP:$PATH" TARTARUS_BASELINE_KIT=KIT
+export PATH="$TMP:$PATH" TARTARUS_BASELINE_KIT=KIT XDG_CONFIG_HOME="$TMP/config"
 
 fails=0
 check() { # check "<tartarus args>" "<expected last sbx line>"
@@ -36,9 +36,11 @@ check "setup" "sbx daemon restart"
 : > "$TMP/log"; "$ROOT/bin/tartarus" setup >/dev/null
 for want in "sbx settings set ssh.agentForwardingEnabled false" "sbx settings set clipboard.imagePaste false" \
   "sbx settings set skills.defaultMode off" "sbx policy reset --force" "sbx policy init deny-all" \
-  "sbx policy deny network *.prod.yourco.com" "sbx daemon restart"; do
+  "sbx policy deny network *.prod.yourco.com" "sbx settings set kit.requireSignature true" "sbx daemon restart"; do
   grep -qxF "$want" "$TMP/log" || { echo "FAIL: setup missing: $want"; fails=1; }
 done
+grep -qF "sbx settings set kit.trustedSigners [{\"key\": \"$TMP/config/tartarus/kit-signing.pub\"}]" "$TMP/log" \
+  || { echo "FAIL: setup did not trust the pinned key"; fails=1; }
 
 # Default names carry a lockdown fingerprint: stable for the same config, new when it changes.
 name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/dev/null 2>&1 || true
