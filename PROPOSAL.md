@@ -163,7 +163,9 @@ Teams can also point `TARTARUS_BASELINE_KIT` at a pinned git copy (`git+https://
 
 Agents commit inside the sandbox; humans review and push from the host. We reach our self-hosted GitHub with `git push` rather than `gh`, and if the server sits on a private address, sandboxes can't reach it at all, because private IP ranges are blocked with no policy override [17]. That's the outcome we want.
 
-Clone mode makes the handoff safe. The agent's commits are exposed to the host through a `sandbox-<name>` Git remote [18], while credentials, signing keys, and `.git/config` stay on the host [18]. The agent can't modify any tracked file or anything under `.git/` on the host, so it can't plant a `.git/hooks/pre-commit` or alter `.github/workflows/` [18].
+Clone mode makes the handoff safe. The agent's commits are exposed to the host through a `sandbox-<name>` Git remote [18], while credentials and signing keys stay on the host [18]. The agent can't modify any tracked file or anything under `.git/` on the host, so it can't plant a `.git/hooks/pre-commit` or alter `.github/workflows/` [18].
+
+The host repo is still readable inside the VM, though: clone mode mounts the whole directory read-only at `/run/sandbox/source`, including untracked and ignored files and `.git/config` (tested). So `run` refuses a repo or extra path that holds secret-looking files git doesn't track (`.env`, `*.pem`, `id_rsa`, `credentials.json` and similar; `TARTARUS_ALLOW_SECRET_FILES=1` overrides) or credentials in `.git/config` (a token in a remote URL, an `http.extraHeader`). It also refuses your home directory, `/`, or a home dotdir as the repo.
 
 ```bash
 tartarus review <sandbox-name> <branch>   # fetch, log, diffstat, and flag files that run on the host
@@ -184,6 +186,10 @@ Fetching isn't approval. Before checking out, building, or opening the branch in
 - every added or changed symlink, which can point a build or IDE at any host file.
 
 Matching is case-insensitive (macOS opens `.VSCode/` as `.vscode/`), and both ends of a rename are checked.
+
+`review` treats the sandbox's Git remote as hostile, because the agent runs the Git server it fetches from:
+- **No tags.** A plain fetch copies the agent's tags into the host repo. A tag named `main` then shadows the branch, both in `review`'s own diff (which would come back empty) and in every later `git diff main` or `git reset main`; a tag like `v1.2.3` can reach a release pipeline. `review` fetches with `--no-tags`, sets `tagOpt=--no-tags` on the remote for later fetches, and resolves only full refnames.
+- **No terminal escapes.** Commit messages and file names are the agent's text. Control characters in them could erase or fake the warnings, so they print as `?`.
 
 The list only covers files that run on their own. Running tests, a build or the app on the host runs every changed file, so a backdoor in `src/` imported by a test runs too. `review` says so on every run. Read the whole diff before running anything on the host, or run tests inside the sandbox (`sbx exec -it <name> bash`).
 

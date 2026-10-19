@@ -32,6 +32,27 @@ check "run claude ~/a ~/ab" "sbx $R $DC claude $HOME/a $HOME/ab:ro"  # prefix-na
 check "run claude --kit evil ." ""        # unknown option: refused, not passed to sbx as a path
 check "run claude ~/a ~/.ssh" ""          # home dotdir: refused
 check "run claude /srv/a $HOME" ""        # all of home: refused
+check "run claude ~" ""                   # home as the repo: refused
+check "run claude ~/.config/x" ""         # dotdir as the repo: refused
+check "run claude /" ""                   # / holds home: refused
+check "run claude ~/a /" ""
+# The repo itself is mounted read-only: credentials in .git/config or untracked secret files leak.
+git init -q "$TMP/sec" && touch "$TMP/sec/.env.example" "$TMP/sec/notes.key.md"
+check "run claude $TMP/sec" "sbx $R $DC claude $TMP/sec"
+git -C "$TMP/sec" remote add origin https://x:ghp_token@github.com/a/b
+check "run claude $TMP/sec" ""
+git -C "$TMP/sec" remote set-url origin git@github.com:a/b && git -C "$TMP/sec" config http.https://github.com/.extraheader "AUTHORIZATION: basic eA=="
+check "run claude $TMP/sec" ""
+git -C "$TMP/sec" config --unset http.https://github.com/.extraheader
+mkdir -p "$TMP/sec/deploy" && touch "$TMP/sec/deploy/prod.pem" && echo '*.pem' > "$TMP/sec/.gitignore"
+check "run claude $TMP/sec" ""
+TARTARUS_ALLOW_SECRET_FILES=1 check "run claude $TMP/sec" "sbx $R $DC claude $TMP/sec"
+rm "$TMP/sec/deploy/prod.pem"; touch "$TMP/sec/.env.local"
+check "run claude $TMP/sec" ""
+rm "$TMP/sec/.env.local"; mkdir -p "$TMP/lib/conf" && touch "$TMP/lib/conf/credentials.json"  # extras aren't repos
+check "run claude $TMP/sec $TMP/lib" ""
+rm "$TMP/lib/conf/credentials.json"
+check "run claude $TMP/sec $TMP/lib" "sbx $R $DC claude $TMP/sec $TMP/lib:ro"
 check "rm a b" "sbx rm --force b"
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
@@ -71,6 +92,8 @@ name_of() { : > "$TMP/log"; env "$@" "$ROOT/bin/tartarus" run claude ~/repo >/de
   grep -oE -- '--name tartarus-claude-repo-[0-9]+' "$TMP/log"; }
 n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
 [[ -n "$n1" && "$n1" == "$n2" && "$n1" != "$n3" ]] || { echo "FAIL: fingerprint names: '$n1' '$n2' '$n3'"; fails=1; }
+: > "$TMP/log"; "$ROOT/bin/tartarus" run claude "$TMP/my_repo (2)" >/dev/null 2>&1 || true
+grep -qE -- '--name tartarus-claude-my-repo--2--[0-9]+ ' "$TMP/log" || { echo "FAIL: name not sanitized: $(cat "$TMP/log")"; fails=1; }
 : > "$TMP/log"; "$ROOT/bin/tartarus" run claude --name mine . >/dev/null 2>&1 || true
 [[ "$(grep -o -- '--name [^ ]*' "$TMP/log")" == "--name mine" ]] || { echo "FAIL: explicit --name overridden"; fails=1; }
 

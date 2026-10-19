@@ -23,6 +23,7 @@ tartarus login claude                    # credential stays in the host keychain
 cd ~/Dev/my-repo
 tartarus run claude --name feat1         # agent works on a private clone; host repo is read-only
 tartarus run claude . ../shared-lib      # extra paths mount read-only; add :rw to make one writable
+                                         # refuses paths with untracked .env/keys or tokens in .git/config
 TARTARUS_REGISTRIES=1 tartarus run claude  # also allow npm and PyPI for this sandbox
 tartarus verify feat1                    # audit plus in-sandbox lockdown checks
 
@@ -47,6 +48,7 @@ tartarus rm feat1
 | Pinned sbx settings | `SETTINGS` in `bin/tartarus` | `tartarus setup` |
 | CPUs / memory | `TARTARUS_CPUS` (4) / `TARTARUS_MEMORY` (8g) | next `run` |
 | Keep sudo and Docker for the agent | `TARTARUS_ALLOW_ROOT=1` | next `run` |
+| Mount paths holding `.env`, keys and similar untracked files | `TARTARUS_ALLOW_SECRET_FILES=1` | next `run` |
 | Alternate kit, deny file, kit sources, signing key | `TARTARUS_BASELINE_KIT`, `TARTARUS_DENY_FILE`, `TARTARUS_KIT_SOURCES`, `TARTARUS_SIGNING_KEY` | |
 
 Kits and policy files are signed: an edited, unsigned or missing one is refused by `sbx`, `setup`, `run` and `audit` until it's re-signed. A changed `kits/signing.pub` is refused by `setup` until you re-run it with `TARTARUS_REPIN=1`.

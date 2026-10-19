@@ -41,6 +41,8 @@ Usage: tartarus <command> [args]
                                 Start the harness in a clone-mode sandbox with the team kit.
                                 First path is the repo the agent changes (default: .). Extra paths
                                 are mounted read-only; suffix one with :rw to make it writable.
+                                Refuses paths holding home dotfiles, untracked secret-looking
+                                files (.env, *.pem...) or credentials in .git/config.
   verify <sandbox-name>         Run audit, then the in-sandbox battery: secrets, host surfaces, egress
   review <sandbox-name> <branch>
                                 Fetch the agent's branch to the host without checking it out, and flag
@@ -54,7 +56,7 @@ Usage: tartarus <command> [args]
 
 Harnesses: copilot, claude, codex
 Env: TARTARUS_SIGNING_KEY, TARTARUS_ALLOW_ROOT=1 (keep sudo/Docker for the agent), TARTARUS_REGISTRIES=1
-     (allow npm and PyPI), TARTARUS_REPIN=1 (trust a changed kits/signing.pub), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
+     (allow npm and PyPI), TARTARUS_ALLOW_SECRET_FILES=1 (mount paths holding .env, keys and the like), TARTARUS_REPIN=1 (trust a changed kits/signing.pub), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
 EOF
 }
 
@@ -196,6 +198,28 @@ cmd_login() {
   esac
 }
 
+# Files whose names say credential: those git doesn't track (untracked or ignored), or every
+# file outside a repo. Examples and templates (.env.example) are fine.
+secret_files() {
+  { git -C "$1" ls-files -z --others 2>/dev/null || (cd "$1" 2>/dev/null && find . -type f -print0); } \
+    | grep -zaiE '(^|/)(\.env(\.[^/]*)?|[^/]*\.(pem|key|p12|pfx|jks|keystore|tfvars|tfstate)|id_(rsa|dsa|ecdsa|ed25519)|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.dockercfg|kubeconfig|credentials(\.json)?|secrets?\.(ya?ml|json|toml|env)|service-account[^/]*\.json)$' \
+    | grep -zaivE '\.(example|sample|template|dist)$' | tr '\0' '\n' || true
+}
+
+# Every path the VM sees is mounted whole (clone mode too, read-only at /run/sandbox/source):
+# untracked and ignored files and .git/config included.
+refuse_exposed() {
+  local leaked
+  leaked="$(git -C "$1" config --local --get-regexp '^(remote\..*\.url|http\..*extraheader)$' 2>/dev/null \
+    | grep -iE '://[^/@:]+:[^/@]+@|authorization' | cut -d' ' -f1 || true)"
+  [[ -z "$leaked" ]] || die "$1/.git/config holds credentials the agent would see ($(paste -sd' ' <<<"$leaked")); remove them first"
+  [[ "${TARTARUS_ALLOW_SECRET_FILES:-}" == 1 ]] && return
+  leaked="$(secret_files "$1")"
+  [[ -z "$leaked" ]] || die "files in $1 look like secrets the agent would see:
+$(head -n 20 <<<"$leaked" | sed 's/^/  /')
+move them out, or TARTARUS_ALLOW_SECRET_FILES=1 if they're harmless"
+}
+
 cmd_run() {
   local harness="${1:-}"; [[ -n "$harness" ]] || die "run needs a harness"; shift
   local kit; kit="$(harness_kit "$harness")"
@@ -222,6 +246,10 @@ cmd_run() {
   local i primary extra home
   primary="$(realpath -m "${paths[0]}")"
   home="$(realpath -m "$HOME")"
+  # Home dotdirs hold keys and tokens (.ssh, .aws, .config, .kube); read-only still leaks them.
+  holds_dotfiles() { [[ "$home/" == "${1%/}/"* || "$1" == "$home"/.* ]]; }  # ${1%/}: / itself holds home
+  holds_dotfiles "$primary" && die "$primary is or holds your home's dotfiles (keys, tokens); run from a repo"
+  refuse_exposed "$primary"
   # sbx ignores creation flags when it re-attaches to an existing sandbox, so the default name
   # carries a fingerprint of the lockdown config: harden tartarus and you get a fresh sandbox.
   if [[ " ${args[*]} " != *" --name "* ]]; then
@@ -229,17 +257,17 @@ cmd_run() {
     # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
     fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/no-root/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
       echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-} ${TARTARUS_REGISTRIES:-}"; } | cksum | cut -d' ' -f1)"
-    args+=(--name "tartarus-$harness-$(basename "$primary")-$fp")
+    local base; base="$(basename "$primary")"
+    args+=(--name "tartarus-$harness-${base//[^A-Za-z0-9.-]/-}-$fp")  # sbx names: letters, digits, - and .
   fi
   # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.
   for ((i = 1; i < ${#paths[@]}; i++)); do
     extra="$(realpath -m "${paths[i]%:r[ow]}")"
     # An extra containing the repo would mount it directly, bypassing clone mode.
-    [[ "$primary/" == "$extra/"* || "$extra/" == "$primary/"* ]] \
+    [[ "$primary/" == "${extra%/}/"* || "$extra/" == "$primary/"* ]] \
       && die "extra path ${paths[i]} overlaps the repo $primary; mount siblings only"
-    # Home dotdirs hold keys and tokens (.ssh, .aws, .config, .kube); read-only still leaks them.
-    [[ "$home/" == "$extra/"* || "$extra" == "$home"/.* ]] \
-      && die "extra path ${paths[i]} is or holds your home's dotfiles (keys, tokens); refused"
+    holds_dotfiles "$extra" && die "extra path ${paths[i]} is or holds your home's dotfiles (keys, tokens); refused"
+    refuse_exposed "$extra"
     case "${paths[i]}" in
       *:rw) paths[i]="${paths[i]%:rw}" ;;
       *:ro) ;;
@@ -341,6 +369,7 @@ cmd_config() {
     printf '%-13s %s\n' "Deny ($(basename "$f" .txt | sed 's/^deny-//'))" "$(hosts_in "$f" | list)"
   done
   echo "Resources     cpus=$CPUS memory=$MEMORY  TARTARUS_CPUS / TARTARUS_MEMORY"
+  echo "Secret files  $( [[ "${TARTARUS_ALLOW_SECRET_FILES:-}" == 1 ]] && echo allowed || echo "refused (.env, keys... outside git)")  TARTARUS_ALLOW_SECRET_FILES=1 allows them"
   echo "Root          $( [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] && echo kept || echo "dropped (kits/no-root)")  TARTARUS_ALLOW_ROOT=1 keeps it"
   echo "Kit sources   $KIT_SOURCES  TARTARUS_KIT_SOURCES"
   echo "Signing key   $SIGNING_KEY  TARTARUS_SIGNING_KEY"
