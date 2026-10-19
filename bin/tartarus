@@ -481,14 +481,14 @@ RISKY=(
   # CI: runs with CI secrets once pushed. Review rules and bots: who must approve, what auto-merges.
   'CODEOWNERS|renovate\.json5?$|\.renovaterc|\.github/|\.gitlab-ci|\.gitlab/|\.gitea/|\.forgejo/|\.circleci/|Jenkinsfile|\.buildkite/|azure-pipelines|\.travis\.yml|bitbucket-pipelines|\.drone\.yml|cloudbuild|\.woodpecker|appveyor|\.semaphore/|\.tekton/'
   # IDEs and editors, which run tasks, launch configs and language servers on open.
-  '\.vscode/|\.idea/|\.fleet/|\.zed/|\.helix/|\.devcontainer|.*\.code-workspace$|.*\.sublime-project$|\.exrc|\.nvimrc|\.nvim\.lua|\.lazy\.lua|\.dir-locals\.el|\.ycm_extra_conf\.py'
+  '\.vscode/|\.idea/|\.run/|\.gitpod\.ya?ml|\.replit|replit\.nix|\.fleet/|\.zed/|\.helix/|\.devcontainer|.*\.code-workspace$|.*\.sublime-project$|\.exrc|\.nvimrc|\.nvim\.lua|\.lazy\.lua|\.dir-locals\.el|\.ycm_extra_conf\.py'
   # Agent config and instructions: prompt injection aimed at the next agent you run on the host.
   # sbxenv.yaml declares sandboxes, mounts and secrets whose commands run on the host (sbx env).
   '\.claude/|\.codex/|sbxenv\.ya?ml|sbx\.ya?ml|\.cursor/|\.gemini/|\.continue/|\.windsurf/|\.kiro/|\.roo|\.amazonq/|\.junie/|\.opencode|opencode\.jsonc?$|\.factory/|\.agents/|\.augment|\.trae/|\.qwen/|\.crush|\.aider|\.goosehints|\.mcp\.json|CLAUDE(\.local)?\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.clinerules'
   # Environment managers and dotenv files, which set PATH, LD_PRELOAD or NODE_OPTIONS for later commands.
   '\.env|\.direnv/|\.?mise[./]|\.tool-versions|.*\.nix$|flake\.lock|devenv\.|devbox\.json|pixi\.toml|rust-toolchain|\.sdkmanrc|Brewfile|Procfile|Vagrantfile|Tiltfile'
   # Build and task files.
-  'Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|Rakefile|[Gg]runtfile|[Gg]ulpfile|CMakeLists\.txt|.*\.cmake$|CMake(User)?Presets\.json|meson\.build|configure(\.ac)?$|conanfile|vcpkg|build\.rs|build\.zig|Package\.swift|Podfile|Cartfile|[^/]*\.xcodeproj/|[^/]*\.xcworkspace/|[^/]*\.xcconfig$|\.xcode-version|mix\.exs|rebar\.config|.*\.cabal$|Setup\.l?hs$|stack\.yaml|Dockerfile|Containerfile|docker-compose|compose\.ya?ml|docker-bake'
+  'Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|Rakefile|[Gg]runtfile|[Gg]ulpfile|CMakeLists\.txt|.*\.cmake$|CMake(User)?Presets\.json|meson\.build|configure(\.ac)?$|conanfile|vcpkg|build\.rs|build\.zig|Package\.swift|Podfile|Cartfile|[^/]*\.xcodeproj/|[^/]*\.xcworkspace/|[^/]*\.xcconfig$|\.xcode-version|mix\.exs|rebar\.config|.*\.cabal$|Setup\.l?hs$|stack\.yaml|Dockerfile|Containerfile|docker-compose|compose\.ya?ml|docker-bake|Earthfile|dagger\.json|skaffold\.ya?ml'
   '\.bazelrc|\.bazelversion|BUILD(\.bazel)?$|WORKSPACE(\.bazel)?$|MODULE\.bazel|.*\.bzl$|BUCK$|\.buckconfig|pants\.toml'
   # JVM and .NET builds: wrappers and properties can fetch and run any build tool or JVM agent.
   '.*\.gradle(\.kts)?$|gradlew|gradle\.properties|gradle-wrapper\.properties|buildSrc/|mvnw|\.mvn/|pom\.xml|.*\.sbt$|\.sbtopts|\.jvmopts|project/[^/]*\.scala$|.*\.(cs|fs|vb)proj$|.*\.(props|targets)$|nuget\.config|global\.json'
@@ -497,7 +497,7 @@ RISKY=(
   # Lockfiles can point a package at any tarball URL without a manifest change.
   'package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|poetry\.lock|uv\.lock|Pipfile\.lock|pdm\.lock|Cargo\.lock|go\.sum|Gemfile\.lock'
   # Language startup hooks and tool configs that load code: IDEs and linters run these on open.
-  'conftest\.py|tox\.ini|noxfile\.py|pytest\.ini|sitecustomize\.py|usercustomize\.py|.*\.pth$|\.?pylintrc|\.?mypy\.ini|\.pdbrc|\.irbrc|\.pryrc|\.gdbinit|\.lldbinit|\.php-cs-fixer'
+  'conftest\.py|tox\.ini|noxfile\.py|pytest\.ini|sitecustomize\.py|usercustomize\.py|.*\.pth$|\.?pylintrc|\.?mypy\.ini|\.pdbrc|\.irbrc|\.pryrc|\.gdbinit|\.lldbinit|\.php-cs-fixer|\.Rprofile|\.ghci$|\.iex\.exs|\.formatter\.exs|\.credo\.exs'
   '.*\.config\.[cm]?[jt]s$|.*\.conf\.[cm]?[jt]s$|.*\.workspace\.[cm]?[jt]s$|\.[a-z]+rc\.[cm]?js$|\.babelrc|babel\.config|\.storybook/'
   # Infrastructure as code: terraform plan runs external data sources; ansible loads ./ansible.cfg.
   '.*\.tf$|.*\.tofu$|\.terraformrc|terragrunt\.hcl|ansible\.cfg'
