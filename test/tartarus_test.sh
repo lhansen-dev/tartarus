@@ -20,6 +20,7 @@ case "\$*" in
   "mcp ls") cat "\$S/mcp" 2>/dev/null || echo "No MCP servers registered"; exit 0 ;;
   "ls --quiet") cat "\$S/sandboxes" 2>/dev/null; exit 0 ;;
   "ls --json") cat "\$S/ls.json" 2>/dev/null || echo "[]"; exit 0 ;;
+  "ports "*" --json") cat "\$S/ports.json" 2>/dev/null || echo "[]"; exit 0 ;;
   "secret ls --json") [ -f "\$S/broken-secrets" ] && exit 1; cat "\$S/secrets.json" 2>/dev/null || echo '{"secrets": [{"scope": "global", "name": "anthropic"}], "custom_secrets": []}'; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
@@ -174,6 +175,14 @@ out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a sandbox
 echo "{\"rules\": [$rules, {\"scope\": \"sandbox:cx\", \"resource_type\": \"network\", \"decision\": \"deny\", \"resources\": [\"openai.com\"]}]}" > "$TMP/state/policy"
 "$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit with all of a sandbox's denies"; fails=1; }
 rm "$TMP/state/policy" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/cx"
+# A port published beyond loopback is an inbound channel to the agent: audit fails.
+echo '[{"name": "pb", "agent": "claude"}]' > "$TMP/state/ls.json"
+echo '[{"host_ip": "127.0.0.1", "host_port": 1, "sandbox_port": 9418}]' > "$TMP/state/ports.json"
+"$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit refused sbx's own git daemon port"; fails=1; }
+echo '[{"host_ip": "0.0.0.0", "host_port": 2, "sandbox_port": 8000}]' > "$TMP/state/ports.json"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a port published beyond loopback"; fails=1; }
+[[ "$out" == *"pb publishes 0.0.0.0:2 -> 8000 beyond loopback"* ]] || { echo "FAIL: audit ports: $out"; fails=1; }
+rm "$TMP/state/ls.json" "$TMP/state/ports.json"
 # sbx failing to answer fails audit, rather than reading as "nothing wrong" (audit runs with set -e off).
 echo '{"rules": [{"scope": "sandbox:ab", "decision": "allow", "resources": ["evil.example"]}]}' > "$TMP/state/approved"
 check "run claude" ""; rm "$TMP/state/approved"

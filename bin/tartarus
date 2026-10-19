@@ -259,6 +259,21 @@ for line in sys.argv[1].splitlines():
     if ("sandbox:" + box, host) not in denied: print("  FAIL  sandbox %s lost its deny for %s (tartarus rm %s; the next run recreates it)" % (box, host, box))' "$pairs" <<<"$policy" 2>/dev/null)" \
     || report="  FAIL  can't check the sandboxes' deny rules"
   [[ -z "$report" ]] || { echo "$report"; fail=1; }
+  # A published port is an inbound channel to the agent that egress rules never see; one bound
+  # beyond loopback lets anyone on the network talk to it. sbx's own git daemon is on loopback.
+  local ports
+  ports="$(while read -r box _; do
+    [[ -n "$box" ]] || continue
+    sbx ports "$box" --json 2>/dev/null | python3 -c '
+import json, sys
+for p in json.load(sys.stdin) or []:
+    where = "%s:%s -> %s" % (p.get("host_ip"), p.get("host_port"), p.get("sandbox_port"))
+    if p.get("host_ip") not in ("127.0.0.1", "::1"): print("  FAIL  sandbox %s publishes %s beyond loopback (sbx ports %s --unpublish ...)" % (sys.argv[1], where, sys.argv[1]))
+    elif p.get("sandbox_port") != 9418: print("  info  sandbox %s publishes %s on loopback" % (sys.argv[1], where))' "$box" \
+      || echo "  FAIL  can't list ports of sandbox $box"
+  done <<<"$boxes")"
+  [[ -n "$ports" ]] && echo "$ports"
+  grep -q FAIL <<<"$ports" && fail=1
   # Every sandbox reaches the MCP gateway (a daemon alias that deny rules don't cover), so any
   # registered server is exposed to every agent; host stdio servers run commands on the host.
   local mcp; mcp="$(sbx mcp ls 2>&1 || true)"
