@@ -70,6 +70,41 @@ if [ "$(id -u)" != 0 ] && ! sudo -n true 2>/dev/null; then
   else pass "BASH_ENV file not agent-writable"; fi
 fi
 
+# A sandbox outlives its session: a hook, a global instruction file or an extra MCP server the
+# agent writes into its own config steers every later session here. A fresh image has none.
+planted="$(python3 -I - <<'EOF'
+import json, os, re
+home = os.path.expanduser("~")
+def load(p):
+    try:
+        with open(os.path.join(home, p)) as f: return f.read()
+    except OSError: return None
+found = []
+s = load(".claude/settings.json")
+if s:
+    try: found += ["~/.claude/settings.json " + k for k in ("hooks", "statusLine", "apiKeyHelper", "env", "awsAuthRefresh", "otelHeadersHelper") if k in json.loads(s)]
+    except ValueError: found.append("~/.claude/settings.json unreadable")
+s = load(".claude.json")
+if s:
+    try: found += ["~/.claude.json MCP server " + k for k in (json.loads(s).get("mcpServers") or {}) if k != "mcp-gateway"]
+    except ValueError: pass
+s = load(".codex/config.toml") or ""
+found += ["~/.codex/config.toml MCP server " + k for k in re.findall(r"^\[mcp_servers\.([^.\]]+)\]", s, re.M) if k != "mcp-gateway"]
+found += ["~/.codex/config.toml notify"] if re.search(r"^\s*notify\s*=", s, re.M) else []
+s = load(".copilot/mcp-config.json")
+if s:
+    try: found += ["~/.copilot MCP server " + k for k in (json.loads(s).get("mcpServers") or {}) if k != "mcp-gateway"]
+    except ValueError: pass
+for p in (".claude/CLAUDE.md", ".claude/agents", ".claude/commands", ".codex/AGENTS.md", ".copilot/copilot-instructions.md"):
+    if os.path.exists(os.path.join(home, p)): found.append("~/" + p)
+print("\n".join(found))
+EOF
+)"
+if [ -n "$planted" ]; then
+  echo "  warn  agent config that steers later sessions (fine if you added it; else tartarus rm for a fresh sandbox):"
+  echo "$planted" | sed 's/^/          /'
+else pass "no hooks, global instructions or extra MCP servers in agent config"; fi
+
 echo "host surfaces"
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/1000}/wayland-0" ] || pgrep -f '^/usr/local/bin/clipboard-bridge' >/dev/null; then
   bad "clipboard bridge present"; else pass "no clipboard bridge"; fi
