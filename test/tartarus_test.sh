@@ -342,6 +342,11 @@ rc=0; out="$(review orphan)" || rc=$?
 [[ $rc == 2 && "$out" == *".github/workflows/o.yml"* ]] || { echo "FAIL: review of an orphan branch (exit $rc)"; echo "$out"; fails=1; }
 rc=0; out="$(review nobranch)" || rc=$?
 [[ $rc == 1 && "$out" == *"it has:"*"  risky"* ]] || { echo "FAIL: review of a missing branch (exit $rc)"; echo "$out"; fails=1; }
+# From another directory, review finds the sandbox's repo through sbx's record of its workspace.
+echo "[{\"name\": \"box\", \"workspaces\": [\"$TMP/host\"]}]" > "$TMP/state/ls.json"
+rc=0; out="$(cd "$TMP" && "$ROOT/bin/tartarus" review box safe 2>&1)" || rc=$?
+[[ $rc == 0 && "$out" == *"reviewing in $TMP/host"* ]] || { echo "FAIL: review from elsewhere (exit $rc)"; echo "$out"; fails=1; }
+rm "$TMP/state/ls.json"
 rc=0; out="$(cd "$TMP/host" && "$ROOT/bin/tartarus" review nobox x 2>&1)" || rc=$?
 [[ $rc == 1 && "$out" == *"no git remote sandbox-nobox"* ]] || { echo "FAIL: review of a missing sandbox (exit $rc)"; echo "$out"; fails=1; }
 rc=0; out="$(review escapes)" || rc=$?

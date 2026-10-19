@@ -472,8 +472,14 @@ review_branch() {
   # --no-tags: the agent's tags would land in this repo, where a tag named main shadows the
   # branch (here and in every later git command) and a v1.2.3 can reach a release pipeline.
   # tagOpt keeps it that way for any later fetch of this remote (git fetch --all included).
-  local remote="sandbox-$name"
-  git config "remote.$remote.url" >/dev/null || die "no git remote $remote; is $name a sandbox of this repo?"
+  local remote="sandbox-$name" repo
+  # From anywhere: the sandbox's own repo, when this one doesn't have its remote.
+  if ! git config "remote.$remote.url" >/dev/null 2>&1; then
+    repo="$(sandbox_repo "$name")"
+    [[ -n "$repo" ]] && git -C "$repo" config "remote.$remote.url" >/dev/null 2>&1 \
+      || die "no git remote $remote here or in $name's workspace; is $name a sandbox?"
+    cd "$repo" && echo "tartarus: reviewing in $repo"
+  fi
   git config "remote.$remote.tagOpt" --no-tags
   # The agent runs the git server: check every object it sends (a tree entry named .git, a
   # hostile .gitmodules) before it lands, here and in any later git fetch --all of this repo.
@@ -580,6 +586,11 @@ cmd_config() {
   echo "Change a kit or policy file, then: tartarus sign-kits. Change policy or settings, then: tartarus setup."
 }
 
+# The repo a sandbox works on, from sbx's record of its workspace ("" if unknown).
+sandbox_repo() { sbx ls --json 2>/dev/null | python3 -c '
+import json, sys
+print(next((s["workspaces"][0] for s in json.load(sys.stdin) if s["name"] == sys.argv[1] and s.get("workspaces")), ""))' "$1" 2>/dev/null || true; }
+
 # Sandboxes keep the lockdown they were made with, so one made before a fix lacks it.
 cmd_ls() {
   local names name lockdown state stale=0
@@ -623,9 +634,7 @@ cmd_rm() {
   cmd_dismiss "$@"
   for name in "$@"; do
     # Clean the sandbox's own repo, from sbx's record of its workspace, wherever rm runs from.
-    repo="$(sbx ls --json | python3 -c '
-import json, sys
-print(next((s["workspaces"][0] for s in json.load(sys.stdin) if s["name"] == sys.argv[1] and s.get("workspaces")), ""))' "$name" 2>/dev/null || true)"
+    repo="$(sandbox_repo "$name")"
     sbx rm --force "$name"
     rm -f "$CONFIG/sandboxes/$name"
     [[ -n "$repo" ]] && drop_sandbox_refs "$repo" "$name"
