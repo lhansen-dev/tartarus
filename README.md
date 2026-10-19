@@ -29,7 +29,7 @@ tartarus verify feat1                    # audit plus in-sandbox lockdown checks
 
 tartarus review feat1 <branch>           # fetch the agent's branch without checking it out;
                                          # exits 2 if it touched hooks, CI, IDE tasks or build files
-git branch my-feature sandbox-feat1/<branch>
+git branch my-feature <commit review printed>  # not the branch: it moves on the next fetch
 tartarus rm feat1                        # also dismisses its pending approval prompts
 tartarus dismiss                         # dismiss every pending prompt; never allow one
 ```

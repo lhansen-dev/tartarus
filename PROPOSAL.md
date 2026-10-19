@@ -169,7 +169,7 @@ The host repo is still readable inside the VM, though: clone mode mounts the who
 
 ```bash
 tartarus review <sandbox-name> <branch>   # fetch, log, diffstat, and flag files that run on the host
-git branch <branch> sandbox-<sandbox-name>/<branch>
+git branch <branch> <commit>               # the commit review printed; the remote branch moves on the next fetch
 tartarus rm <sandbox-name>                # remove the sandbox and the refs sbx leaves behind
 ```
 

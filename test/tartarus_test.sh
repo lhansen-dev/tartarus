@@ -209,6 +209,7 @@ grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify require
 ) >/dev/null
 review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
 out="$(review safe)" || { echo "FAIL: review safe exited $?"; fails=1; }
+[[ "$out" == *"git branch <name> $(git -C "$TMP/agent" rev-parse safe)"* ]] || { echo "FAIL: review did not print the reviewed commit"; fails=1; }
 rc=0; out="$(review risky)" || rc=$?
 if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "$out" != *"  yarn.lock"* || "$out" != *"  CLAUDE.md"* || "${out#*REVIEW BEFORE}" == *docs.md* || "${out#*REVIEW BEFORE}" == *README* ]]; then
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
