@@ -401,10 +401,6 @@ cmd_run() {
   local args=(run --clone --skills off --cpus "$CPUS" --memory "$MEMORY" --kit "$BASELINE_KIT")
   [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] || args+=(--kit "$ROOT/kits/no-root")
   [[ "${TARTARUS_REGISTRIES:-}" == 1 ]] && args+=(--kit "$ROOT/kits/registries")
-  # A drifted machine (an approved prompt's allow, a registered MCP server, an unsigned deny
-  # list) would widen every new sandbox, so it doesn't get one.
-  local report; report="$(cmd_audit)" || die "audit failed; fix it before running an agent:
-$(sanitize <<<"$report")"
   local host denies
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
   denies="$(hosts_in "$ROOT/policy/deny-$harness.txt")"
@@ -422,6 +418,10 @@ $(sanitize <<<"$report")"
     esac
   done
   ((${#paths[@]})) || paths=(.)
+  # A drifted machine (an approved prompt's allow, a registered MCP server, an unsigned deny
+  # list) would widen every new sandbox, so it doesn't get one.
+  local report; report="$(cmd_audit)" || die "audit failed; fix it before running an agent:
+$(sanitize <<<"$report")"
   local i primary extra home
   primary="$(abspath "${paths[0]}")"
   home="$(abspath "$HOME")"
