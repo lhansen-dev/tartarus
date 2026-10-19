@@ -26,6 +26,9 @@ echo "sbx \$*" >> "$TMP/log"
 EOF
 chmod +x "$TMP/sbx"
 export PATH="$TMP:$PATH" TARTARUS_BASELINE_KIT=KIT XDG_CONFIG_HOME="$TMP/config"
+# Paths like ~/a stand for repos in the tests; keep them, and git's config, away from the real home.
+export HOME="$TMP/home" GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+mkdir -p "$HOME"
 "$ROOT/bin/tartarus" setup >/dev/null
 # run writes to the repo it's given (.): use a scratch one, and check this repo comes out untouched.
 own_config="$(git -C "$ROOT" config --local -l 2>/dev/null || true)"
