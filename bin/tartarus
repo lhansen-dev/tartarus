@@ -283,7 +283,7 @@ cmd_run() {
   # A drifted machine (an approved prompt's allow, a registered MCP server, an unsigned deny
   # list) would widen every new sandbox, so it doesn't get one.
   local report; report="$(cmd_audit)" || die "audit failed; fix it before running an agent:
-$report"
+$(sanitize <<<"$report")"
   local host denies
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
   denies="$(hosts_in "$ROOT/policy/deny-$harness.txt")"
@@ -600,15 +600,17 @@ cmd_safe() {
 
 case "${1:-}" in
   setup) shift; cmd_setup "$@" ;;
-  audit) shift; cmd_audit "$@" ;;
+  # Output that carries text from inside sandboxes (file names, requested hosts) goes through
+  # sanitize; with pipefail, the command's exit status survives it.
+  audit) shift; cmd_audit "$@" | sanitize ;;
   config) shift; cmd_config "$@" ;;
   login) shift; cmd_login "$@" ;;
   run) shift; cmd_run "$@" ;;
-  verify) shift; cmd_verify "$@" ;;
+  verify) shift; cmd_verify "$@" 2>&1 | sanitize ;;
   review) shift; cmd_review "$@" ;;
   rm) shift; cmd_rm "$@" ;;
   dismiss) shift; cmd_dismiss "$@" ;;
-  ls) shift; cmd_ls "$@" ;;
+  ls) shift; cmd_ls "$@" | sanitize ;;
   sign-kits) shift; cmd_sign_kits "$@" ;;
   safe) shift; cmd_safe "$@" ;;
   ""|-h|--help|help) usage ;;
