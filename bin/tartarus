@@ -279,6 +279,22 @@ for line in sys.argv[1].splitlines():
     [[ -z "$added" ]] || grown+="  FAIL  sandbox $box gained allows since tartarus first saw it (sbx kit add?): $added"$'\n'
   done <<<"$boxes"
   [[ -z "$grown" ]] || { printf '%s' "$grown"; fail=1; }
+  # sbx inspect shows what a sandbox has now: host paths added with sbx mount (rw by default, past
+  # run's checks) and its kits, which sbx kit add appends to. Only tartarus's own kits belong.
+  local insp=""
+  while read -r box _; do
+    [[ -n "$box" && -f "$CONFIG/sandboxes/$box" ]] || continue
+    insp+="$(sbx inspect "$box" --json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin); box = sys.argv[1]; ours = set(sys.argv[2:])
+for m in d.get("runtime_mounts") or []:
+    print("  FAIL  sandbox %s has %s mounted outside tartarus (sbx umount %s %s)" % (box, m.get("host_path"), box, m.get("host_path")))
+for k in d.get("kits") or []:
+    if k not in ours: print("  FAIL  sandbox %s has a kit tartarus did not add: %s" % (box, k))' "$box" "$BASELINE_KIT" \
+      "$ROOT/kits/no-root" "$ROOT/kits/registries" "$COPILOT_KIT" || echo "  FAIL  can't inspect sandbox $box (sbx inspect)")"$'\n'
+  done <<<"$boxes"
+  insp="$(sed '/^$/d' <<<"$insp")"
+  [[ -z "$insp" ]] || { echo "$insp"; fail=1; }
   # A published port is an inbound channel to the agent that egress rules never see; one bound
   # beyond loopback lets anyone on the network talk to it. sbx's own git daemon is on loopback.
   local ports

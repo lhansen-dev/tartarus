@@ -21,6 +21,7 @@ case "\$*" in
   "ls --quiet") cat "\$S/sandboxes" 2>/dev/null; exit 0 ;;
   "ls --json") cat "\$S/ls.json" 2>/dev/null || echo "[]"; exit 0 ;;
   "ports "*" --json") cat "\$S/ports.json" 2>/dev/null || echo "[]"; exit 0 ;;
+  "inspect "*" --json") cat "\$S/inspect.json" 2>/dev/null || echo '{"kits": [], "runtime_mounts": []}'; exit 0 ;;
   "secret ls --json") [ -f "\$S/broken-secrets" ] && exit 1; cat "\$S/secrets.json" 2>/dev/null || echo '{"secrets": [{"scope": "global", "name": "anthropic"}], "custom_secrets": []}'; exit 0 ;;
 esac
 echo "sbx \$*" >> "$TMP/log"
@@ -194,6 +195,17 @@ echo '[{"name": "ka", "agent": "shell", "created_at": "T2"}]' > "$TMP/state/ls.j
 out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a recreated sandbox"; fails=1; }
 [[ "$out" == *"ka was recreated"* ]] || { echo "FAIL: audit recreated: $out"; fails=1; }
 rm -f "$TMP/state/policy" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/ka"*
+# sbx inspect: a runtime mount (sbx mount) or a kit tartarus didn't add fails audit.
+echo "1 2 0" > "$TMP/config/tartarus/sandboxes/in"; echo '[{"name": "in", "agent": "shell", "created_at": "T"}]' > "$TMP/state/ls.json"
+echo '{"kits": ["KIT"], "runtime_mounts": [{"host_path": "/home/u/.ssh"}]}' > "$TMP/state/inspect.json"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a runtime mount"; fails=1; }
+[[ "$out" == *"in has /home/u/.ssh mounted outside tartarus"* ]] || { echo "FAIL: audit runtime mount: $out"; fails=1; }
+echo '{"kits": ["KIT", "docker.io/evil/kit:1"], "runtime_mounts": []}' > "$TMP/state/inspect.json"
+out="$("$ROOT/bin/tartarus" audit 2>&1)" && { echo "FAIL: audit passed a foreign kit"; fails=1; }
+[[ "$out" == *"kit tartarus did not add: docker.io/evil/kit:1"* ]] || { echo "FAIL: audit foreign kit: $out"; fails=1; }
+echo '{"kits": ["KIT"], "runtime_mounts": []}' > "$TMP/state/inspect.json"
+"$ROOT/bin/tartarus" audit >/dev/null || { echo "FAIL: audit of a clean inspect"; fails=1; }
+rm -f "$TMP/state/inspect.json" "$TMP/state/ls.json" "$TMP/config/tartarus/sandboxes/in"*
 # A port published beyond loopback is an inbound channel to the agent: audit fails.
 echo '[{"name": "pb", "agent": "claude"}]' > "$TMP/state/ls.json"
 echo '[{"host_ip": "127.0.0.1", "host_port": 1, "sandbox_port": 9418}]' > "$TMP/state/ports.json"
