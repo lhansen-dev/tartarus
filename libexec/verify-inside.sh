@@ -33,6 +33,10 @@ echo "secrets"
 if env | grep -E '^(VAULT_|AWS_|OP_|GH_TOKEN=|GITHUB_TOKEN=|ANTHROPIC_API_KEY=|OPENAI_API_KEY=|KUBECONFIG=)' \
   | grep -vE 'proxymanaged|proxy-managed'; then bad "host secrets in env"; else pass "no host secrets in env"; fi
 if ssh-add -l >/dev/null 2>&1; then bad "SSH agent reachable"; else pass "no SSH agent"; fi
+# Real credentials stay on the host; the agent's config should only ever hold proxy sentinels.
+if grep -rlsE 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}' \
+  ~/.claude ~/.claude.json ~/.codex ~/.copilot ~/.config 2>/dev/null | grep -v '/projects/'; then
+  bad "real-looking tokens in agent config (files above)"; else pass "agent config holds no real tokens"; fi
 if command -v kubectl >/dev/null && kubectl config current-context >/dev/null 2>&1; then
   bad "kube context set"; else pass "no kube context"; fi
 
@@ -78,6 +82,21 @@ done
 for port in 22 8080 11434; do
   [ "$(tcp gateway.docker.internal "$port")" = closed ] && pass "gateway:$port unreachable" || bad "gateway:$port reachable"
 done
+udp() {
+  python3 - "$1" <<'EOF'
+import socket, sys
+q = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(4)
+try:
+    s.sendto(q, (sys.argv[1], 53)); s.recvfrom(512); print("open")
+except Exception:
+    print("closed")
+EOF
+}
+for ip in 8.8.8.8 1.1.1.1; do
+  [ "$(udp "$ip")" = closed ] && pass "no direct UDP DNS to $ip" || bad "direct UDP DNS to $ip answered"
+done
+[ "$(tcp 2606:4700:4700::1111 443)" = closed ] && pass "no direct IPv6 TCP" || bad "direct IPv6 TCP to 2606:4700:4700::1111"
 if [ -n "$(dig +short +time=3 +tries=1 example.com 2>/dev/null)" ]; then bad "DNS resolves public names"; else pass "DNS for public names blocked"; fi
 
 [ "$fail" = 0 ] && echo "PASS: all walls standing" || echo "FAIL: see above"
