@@ -2,7 +2,7 @@
 # tartarus: run AI coding agents (Copilot, Claude Code, Codex) inside Docker Sandboxes (sbx).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"  # resolve symlinks on PATH
 BASELINE_KIT="${TARTARUS_BASELINE_KIT:-$ROOT/kits/team-baseline}"
 KIT_SOURCES="${TARTARUS_KIT_SOURCES:-[\"docker.io/sbx/\"]}"
 DENY_FILE="${TARTARUS_DENY_FILE:-$ROOT/policy/deny.txt}"
