@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# tartarus: run AI coding agents (Copilot, Claude Code, Codex) inside Docker Sandboxes (sbx).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASELINE_KIT="${TARTARUS_BASELINE_KIT:-$ROOT/kits/team-baseline}"
+KIT_SOURCES="${TARTARUS_KIT_SOURCES:-[\"docker.io/sbx/\",\"github.com/yourorg/\"]}"
+DENY_FILE="${TARTARUS_DENY_FILE:-$ROOT/policy/deny.txt}"
+
+usage() {
+  cat <<'EOF'
+Usage: tartarus <command> [args]
+
+  setup                         Harden sbx once per machine (SSH forwarding off, kit sources, network policy)
+  login <harness>               Store the harness credential in the host keychain (never enters the VM)
+  run <harness> [--name N] [path...] [-- agent args]
+                                Start the harness in a clone-mode sandbox with the team kit.
+                                First path is the repo the agent changes (default: .); add :ro to extras.
+  verify <sandbox-name>         Check a running sandbox holds no host secrets, SSH keys or kube context
+  safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
+
+Harnesses: copilot, claude, codex
+EOF
+}
+
+die() { echo "tartarus: $*" >&2; exit 1; }
+
+# Per-harness wiring. Agent names and defaults are sbx's own: copilot --yolo,
+# claude --dangerously-skip-permissions, codex --dangerously-bypass-approvals-and-sandbox.
+harness_kit() {
+  case "$1" in
+    copilot) echo "docker.io/sbx/copilot-kit:latest" ;;
+    claude|codex) ;;
+    *) die "unknown harness '$1' (copilot, claude, codex)" ;;
+  esac
+}
+
+cmd_setup() {
+  sbx settings set ssh.agentForwardingEnabled false
+  sbx settings set kit.allowedSources "$KIT_SOURCES"
+  # init refuses to run twice; keep an existing policy rather than reset it.
+  sbx policy init balanced 2>/dev/null || echo "tartarus: network policy already initialized, keeping it"
+  if [[ -f "$DENY_FILE" ]]; then
+    grep -Ev '^\s*(#|$)' "$DENY_FILE" | while read -r host; do
+      sbx policy deny network "$host"
+    done
+  fi
+}
+
+cmd_login() {
+  case "${1:-}" in
+    # Only the Copilot API credential; no `github` secret, so the sandbox can't push to github.com.
+    copilot) sbx secret set copilot ;;
+    codex) sbx secret set openai --oauth ;;
+    claude)
+      echo "Claude Code: subscriptions sign in with /login inside the sandbox (OAuth; token stays on the host)."
+      echo "Storing an Anthropic API key instead (Ctrl-C to skip):"
+      sbx secret set anthropic ;;
+    *) die "login needs a harness: copilot, claude, codex" ;;
+  esac
+}
+
+cmd_run() {
+  local harness="${1:-}"; [[ -n "$harness" ]] || die "run needs a harness"; shift
+  local kit; kit="$(harness_kit "$harness")"
+  local args=(run --clone --kit "$BASELINE_KIT")
+  [[ -n "$kit" ]] && args+=(--kit "$kit")
+  local paths=() rest=()
+  while (($#)); do
+    case "$1" in
+      --name) [[ $# -ge 2 ]] || die "--name needs a value"; args+=(--name "$2"); shift 2 ;;
+      --) shift; rest=("$@"); break ;;
+      *) paths+=("$1"); shift ;;
+    esac
+  done
+  ((${#paths[@]})) || paths=(.)
+  args+=("$harness" "${paths[@]}")
+  ((${#rest[@]})) && args+=(-- "${rest[@]}")
+  exec sbx "${args[@]}"
+}
+
+cmd_verify() {
+  local name="${1:-}"; [[ -n "$name" ]] || die "verify needs a sandbox name"
+  # shortcut: assumes `sbx exec <name> <cmd...>`; confirm against `sbx exec --help` on first use.
+  # shellcheck disable=SC2016 # expands inside the sandbox, not here
+  sbx exec "$name" sh -c '
+    fail=0
+    # Proxy-managed credentials show up as sentinel values, which are safe.
+    if env | grep -E "^(VAULT_|AWS_|OP_|GH_TOKEN=|GITHUB_TOKEN=|KUBECONFIG=)" | grep -vE "proxymanaged|proxy-managed"; then
+      echo "FAIL: host secrets in env"; fail=1; fi
+    if ssh-add -l >/dev/null 2>&1; then echo "FAIL: SSH agent reachable"; fail=1; fi
+    if command -v kubectl >/dev/null && kubectl config current-context 2>/dev/null; then
+      echo "FAIL: kube context set"; fail=1; fi
+    [ "$fail" = 0 ] && echo "OK: no host secrets, SSH agent or kube context"
+    exit "$fail"'
+  echo "Review egress with: sbx policy log"
+}
+
+cmd_safe() {
+  local harness="${1:-}"; [[ -n "$harness" ]] || die "safe needs a harness"; shift
+  local cmd
+  case "$harness" in
+    copilot) cmd=(copilot --sandbox) ;;
+    codex) cmd=(codex --sandbox workspace-write) ;;
+    claude) cmd=(claude) ;; # keeps permission prompts on; no sandbox flag to add
+    *) die "unknown harness '$harness' (copilot, claude, codex)" ;;
+  esac
+  # Drops VAULT_*, AWS_*, SSH_AUTH_SOCK, op-run injections; kubectl sees no clusters.
+  exec env -i HOME="$HOME" PATH="$PATH" TERM="${TERM:-xterm}" KUBECONFIG=/dev/null "${cmd[@]}" "$@"
+}
+
+case "${1:-}" in
+  setup) shift; cmd_setup "$@" ;;
+  login) shift; cmd_login "$@" ;;
+  run) shift; cmd_run "$@" ;;
+  verify) shift; cmd_verify "$@" ;;
+  safe) shift; cmd_safe "$@" ;;
+  ""|-h|--help|help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac
