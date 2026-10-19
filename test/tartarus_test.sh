@@ -340,6 +340,12 @@ if [[ $rc != 2 || "$out" == *$'\033'* || "$out" == *$'\007'* || "$out" == *$'\30
   echo "FAIL: review escapes (exit $rc)"; printf '%q\n' "$out"; fails=1
 fi
 
+# The committed policy must be signed by the committed key (an unsigned edit would ship refused).
+for f in "$ROOT"/policy/*.txt; do
+  openssl dgst -sha256 -verify "$ROOT/kits/signing.pub" -signature "$f.sig" "$f" >/dev/null 2>&1 \
+    || { echo "FAIL: $f is not signed by kits/signing.pub (tartarus sign-kits)"; fails=1; }
+done
+for k in "$ROOT"/kits/*/; do [[ -s "$k/kit.sig.bundle" ]] || { echo "FAIL: $k has no kit.sig.bundle"; fails=1; }; done
 [[ "$(git -C "$ROOT" config --local -l 2>/dev/null || true)" == "$own_config" ]] || { echo "FAIL: the tests changed this repo's git config"; fails=1; }
 if command -v shellcheck >/dev/null; then
   shellcheck -S warning "$ROOT/bin/tartarus" "$ROOT/libexec/verify-inside.sh" "$ROOT/test/tartarus_test.sh" "$ROOT/test/live_test.sh" || { echo "FAIL: shellcheck"; fails=1; }
