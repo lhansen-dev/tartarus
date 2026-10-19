@@ -578,6 +578,13 @@ f = ""
 for line in sys.stdin:
     if line.startswith("+++ "): f = line[6:].rstrip("\n") if line.startswith("+++ b/") else ""
     elif line.startswith("+") and pat.search(line): print(f + " (credential-shaped string)")' | sort -u)"
+  # Commit messages and author fields are pushed too.
+  leaks+=$'\n'"$(git log --format='%H %an %ae %cn %ce %B%x00' "HEAD..$tip" | python3 -c '
+import re, sys
+pat = re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY")
+for c in sys.stdin.read().split("\0"):
+    c = c.strip()
+    if c and pat.search(c): print("commit %s message or author (credential-shaped string)" % c[:12])')"
   risky="$(printf '%s\n%s' "$risky" "$leaks" | sed '/^$/d')"
   # The list only covers files that run on their own. Running tests or the app runs every changed file.
   local after="Every changed file runs once you test, build or start the app on the host: read the whole
@@ -589,7 +596,7 @@ Reviewed $tip. Take exactly that commit, not the branch, which moves on the next
     printf '%s\n' "$risky" | sed 's/^/  /'
     # Shell-quoted: the names are the agent's. :(literal) stops git reading them as pathspec magic.
     local f quoted=()
-    while IFS= read -r f; do quoted+=("$(printf '%q' ":(literal)${f% (symlink)}")"); done <<<"$(sed -e 's/ (submodule)$//' -e 's/ (credential-shaped string)$//' <<<"$risky" | sort -u)"
+    while IFS= read -r f; do quoted+=("$(printf '%q' ":(literal)${f% (symlink)}")"); done <<<"$(sed -e 's/ (submodule)$//' -e 's/ (credential-shaped string)$//' -e '/^commit [0-9a-f]* message or author$/d' <<<"$risky" | sort -u)"
     echo; echo "See just those changes: git diff ${base:0:12} ${tip:0:12} -- ${quoted[*]}"
     echo; echo "$after"
     return 2
