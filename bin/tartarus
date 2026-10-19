@@ -24,6 +24,10 @@ KEYLESS_SIGNERS='[{"identity": "https://github.com/docker/sbx-kits-contrib/.gith
 #   --certificate-identity <identity above> --certificate-oidc-issuer https://token.actions.githubusercontent.com
 COPILOT_KIT="docker.io/sbx/copilot-kit@sha256:02048b3c37f12fdbaf36d80c1a177f15877ed40acd444c1b58829787e16bb108"
 
+# Credential shapes: JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens,
+# private keys. libexec/verify-inside.sh scans the sandbox for the same ones.
+TOKEN_RE='eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY'
+
 # Host settings tartarus pins. `audit` fails if any drifts.
 SETTINGS=(
   ssh.agentForwardingEnabled=false  # 1Password's agent would hand over every key
@@ -356,6 +360,22 @@ cmd_login() {
 # Files whose names say credential: those git doesn't track (untracked or ignored), or every
 # file outside a repo. Examples and templates (.env.example) are fine.
 secret_files() {
+  secret_names "$1"
+  # And contents: an untracked config.json can hold a token too. Bounded, skipping dependency and
+  # build folders, so a big repo stays quick.
+  { git -C "$1" ls-files -z --others 2>/dev/null || (cd "$1" 2>/dev/null && find . -type f -print0); } | (cd "$1" && python3 -c '
+import os, re, sys, time
+pat = re.compile(sys.argv[1].encode()); skip = {"node_modules", ".venv", "venv", "target", "dist", "build", ".git", "__pycache__", ".gradle", ".tox"}
+start, n = time.time(), 0
+for p in sys.stdin.buffer.read().split(b"\0"):
+    if not p or skip & set(p.decode(errors="replace").split("/")): continue
+    n += 1
+    if n > 20000 or time.time() - start > 5: break
+    try:
+        if os.path.getsize(p) <= 1 << 20 and os.path.isfile(p) and pat.search(open(p, "rb").read()): print(p.decode(errors="replace").removeprefix("./") + " (holds a credential-shaped string)")
+    except OSError: pass' "$TOKEN_RE") || true
+}
+secret_names() {
   { git -C "$1" ls-files -z --others 2>/dev/null || (cd "$1" 2>/dev/null && find . -type f -print0); } \
     | grep -zaiE '(^|/)(\.env(\.[^/]*)?|[^/]*\.(pem|key|p12|pfx|jks|keystore|tfvars|tfstate)|id_(rsa|dsa|ecdsa|ed25519)|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.dockercfg|kubeconfig|credentials(\.json)?|secrets?\.(ya?ml|json|toml|env)|service-account[^/]*\.json)$' \
     | grep -zaivE '\.(example|sample|template|dist)$' | tr '\0' '\n' || true
@@ -506,10 +526,6 @@ RISKY=(
   '.*\.(jar|war|class|pyc|pyo|so|dylib|dll|exe|node|wasm|whl|egg|a|o)$'
 )
 RISKY_PATHS="(^|/)($(IFS='|'; echo "${RISKY[*]}"))"
-
-# Credential shapes: JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens,
-# private keys. libexec/verify-inside.sh scans the sandbox for the same ones.
-TOKEN_RE='eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY'
 
 # Commit messages and file names come from the agent: escape sequences in them could erase or
 # fake the warnings below, so control characters (C0, DEL and C1) print as '?'.

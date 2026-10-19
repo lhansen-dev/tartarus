@@ -90,7 +90,11 @@ check "run claude $TMP/sec" ""
 TARTARUS_ALLOW_SECRET_FILES=1 check "run claude $TMP/sec" "sbx $R $DC claude $TMP/sec"
 rm "$TMP/sec/deploy/prod.pem"; touch "$TMP/sec/.env.local"
 check "run claude $TMP/sec" ""
-rm "$TMP/sec/.env.local"; mkdir -p "$TMP/lib/conf" && touch "$TMP/lib/conf/credentials.json"  # extras aren't repos
+rm "$TMP/sec/.env.local"; printf '{"token": "ghp_%s"}\n' "$(printf 'a%.0s' $(seq 36))" > "$TMP/sec/config.json"
+check "run claude $TMP/sec" ""                                   # a token inside an untracked file
+mkdir -p "$TMP/sec/node_modules/x" && mv "$TMP/sec/config.json" "$TMP/sec/node_modules/x/"
+check "run claude $TMP/sec" "sbx $R $DC claude $TMP/sec"           # dependency folders aren't scanned
+rm -rf "$TMP/sec/node_modules"; mkdir -p "$TMP/lib/conf" && touch "$TMP/lib/conf/credentials.json"  # extras aren't repos
 check "run claude $TMP/sec $TMP/lib" ""
 rm "$TMP/lib/conf/credentials.json"
 check "run claude $TMP/sec $TMP/lib" "sbx $R $DC claude $TMP/sec $TMP/lib:ro"
