@@ -191,7 +191,9 @@ Fetching isn't approval. Before checking out, building, or opening the branch in
 Matching is case-insensitive (macOS opens `.VSCode/` as `.vscode/`), and both ends of a rename are checked.
 
 `review` treats the sandbox's Git remote as hostile, because the agent runs the Git server it fetches from:
-- **No tags.** A plain fetch copies the agent's tags into the host repo. A tag named `main` then shadows the branch, both in `review`'s own diff (which would come back empty) and in every later `git diff main` or `git reset main`; a tag like `v1.2.3` can reach a release pipeline. `review` fetches with `--no-tags`, sets `tagOpt=--no-tags` on the remote for later fetches, and resolves only full refnames.
+- **No tags.** A plain fetch copies the agent's tags into the host repo. A tag named `main` then shadows the branch, both in `review`'s own diff (which would come back empty) and in every later `git diff main` or `git reset main`; a tag like `v1.2.3` can reach a release pipeline. `run` sets `tagOpt=--no-tags` on the sandbox's remote before `sbx` creates it, so even a `git fetch --all` skips them, and `review` resolves only full refnames.
+- **Checked objects.** `run` and `review` turn on `fetch.fsckObjects` for the repo, so a tree entry named `.git` or a hostile `.gitmodules` is refused before it lands (tested).
+- **Fails closed.** A branch with no history in common with yours is reviewed file by file against an empty tree, and any git error stops the review instead of reading as "nothing risky".
 - **No terminal escapes.** Commit messages and file names are the agent's text. Control characters in them could erase or fake the warnings, so they print as `?`.
 
 The list only covers files that run on their own. Running tests, a build or the app on the host runs every changed file, so a backdoor in `src/` imported by a test runs too. `review` says so on every run. Read the whole diff before running anything on the host, or run tests inside the sandbox (`sbx exec -it <name> bash`).

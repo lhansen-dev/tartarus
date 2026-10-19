@@ -316,6 +316,12 @@ $report"
     local base; base="$(basename "$primary")"
     name="tartarus-$harness-${base//[^A-Za-z0-9.-]/-}-$fp"  # sbx names: letters, digits, - and .
   fi
+  # sbx adds a sandbox-<name> remote whose git server the agent runs. Before it exists: no tags
+  # from it (a tag named main shadows the branch) and fsck on every fetch, git fetch --all too.
+  if git -C "$primary" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$primary" config "remote.sandbox-$name.tagOpt" --no-tags
+    git -C "$primary" config fetch.fsckObjects true
+  fi
   local existing record="$CONFIG/sandboxes/$name"
   existing="$(sbx ls --quiet)" || die "can't list sandboxes (sbx ls)"
   if grep -qxF "$name" <<<"$existing"; then
@@ -334,7 +340,7 @@ $report"
 # Each entry matches from the start of a path component, as a prefix unless it ends in $.
 RISKY=(
   # Git: hooks, filters and submodules.
-  '\.git/|\.githooks/|\.husky|\.gitattributes|\.gitmodules|\.lfsconfig|\.pre-commit|lefthook|\.?simple-git-hooks|\.lintstagedrc|lint-staged\.config'
+  '\.git(/|$)|\.githooks/|\.husky|\.gitattributes|\.gitmodules|\.lfsconfig|\.pre-commit|lefthook|\.?simple-git-hooks|\.lintstagedrc|lint-staged\.config'
   # CI: runs with CI secrets once pushed.
   '\.github/|\.gitlab-ci|\.gitlab/|\.gitea/|\.forgejo/|\.circleci/|Jenkinsfile|\.buildkite/|azure-pipelines|\.travis\.yml|bitbucket-pipelines|\.drone\.yml|cloudbuild|\.woodpecker|appveyor|\.semaphore/|\.tekton/'
   # IDEs and editors, which run tasks, launch configs and language servers on open.
@@ -370,11 +376,9 @@ import re, sys
 sys.stdin.reconfigure(errors="replace")
 sys.stdout.write(re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "?", sys.stdin.read()))'; }
 
-cmd_review() {
-  local rc=0
-  review_branch "$@" 2>&1 | sanitize || rc=$?
-  return "$rc"
-}
+# No || here: inside one, bash turns set -e off for everything review_branch runs, and a failed
+# git diff would read as "nothing risky". With pipefail, its exit status (2: risky) is ours.
+cmd_review() { review_branch "$@" 2>&1 | sanitize; }
 
 review_branch() {
   local name="${1:-}" branch="${2:-}"
@@ -386,7 +390,10 @@ review_branch() {
   local remote="sandbox-$name"
   git config "remote.$remote.url" >/dev/null || die "no git remote $remote; is $name a sandbox of this repo?"
   git config "remote.$remote.tagOpt" --no-tags
-  git fetch --no-tags "$remote"
+  # The agent runs the git server: check every object it sends (a tree entry named .git, a
+  # hostile .gitmodules) before it lands, here and in any later git fetch --all of this repo.
+  git config fetch.fsckObjects true
+  git fetch --no-tags --no-recurse-submodules "$remote"
   # Full refnames from here on: a short name like main can resolve to something else.
   local ref="refs/remotes/$remote/$branch" range
   git rev-parse --verify -q "$ref^{commit}" >/dev/null || {
@@ -395,17 +402,19 @@ review_branch() {
     return 1
   }
   # Everything below looks at this one commit; the ref moves on the next fetch, unreviewed.
-  local tip; tip="$(git rev-parse "$ref^{commit}")"
-  range="HEAD...$tip"
+  local tip base; tip="$(git rev-parse "$ref^{commit}")"
+  # An orphan branch shares no history with HEAD: then every file in it is new.
+  base="$(git merge-base HEAD "$tip")" || base="$(git hash-object -t tree /dev/null)"
+  range=("$base" "$tip")
   git log --oneline "HEAD..$tip"
-  git diff --stat "$range"
+  git diff --stat "${range[@]}"
   # -z: no quoting of odd names to slip past ^; --no-renames: list both ends of a move;
   # -i: case-insensitive filesystems (macOS) open .VSCode/ as .vscode/.
   local risky links
-  risky="$(git diff --no-renames --name-only -z "$range" | grep -izE "$RISKY_PATHS" | tr '\0' '\n' || true)"
+  risky="$(git diff --no-renames --name-only -z "${range[@]}" | { grep -izE "$RISKY_PATHS" || (($? == 1)); } | tr '\0' '\n')"
   # A symlink can point a build or IDE at any host file once checked out; a moved submodule
   # pointer makes git submodule update check out other code with no .gitmodules change.
-  links="$(git diff --no-renames --raw "$range" \
+  links="$(git diff --no-renames --raw "${range[@]}" \
     | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"} index($1, " 160000 ") {print $2 " (submodule)"}')"
   risky="$(printf '%s\n%s' "$risky" "$links" | sed '/^$/d')"
   # The list only covers files that run on their own. Running tests or the app runs every changed file.

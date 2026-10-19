@@ -61,6 +61,9 @@ check "run claude ~/a /" ""
 # The repo itself is mounted read-only: credentials in .git/config or untracked secret files leak.
 git init -q "$TMP/sec" && touch "$TMP/sec/.env.example" "$TMP/sec/notes.key.md"
 check "run claude $TMP/sec" "sbx $R $DC claude $TMP/sec"
+n="$(grep -oE -- '--name [^ ]+' "$TMP/log" | cut -d' ' -f2)"
+[[ "$(git -C "$TMP/sec" config "remote.sandbox-$n.tagOpt")" == --no-tags && "$(git -C "$TMP/sec" config fetch.fsckObjects)" == true ]] \
+  || { echo "FAIL: run did not protect the repo from the sandbox remote"; fails=1; }
 git -C "$TMP/sec" remote add origin https://x:ghp_token@github.com/a/b
 check "run claude $TMP/sec" ""
 git -C "$TMP/sec" remote set-url origin git@github.com:a/b && git -C "$TMP/sec" config http.https://github.com/.extraheader "AUTHORIZATION: basic eA=="
@@ -222,10 +225,21 @@ grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify require
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
   # A tag named main at the risky commit would make the review diff risky against itself.
   git tag main risky && git tag sandbox-box/risky safe
+  # An orphan branch shares no history with the host: review must still see every file.
+  git checkout -q --orphan orphan && git rm -rq --cached . && mkdir -p .github/workflows && touch .github/workflows/o.yml \
+    && git add .github && git commit -q -m orphan && git clean -fdq
   git checkout -q -b escapes safe && touch "$(printf 'x\033[2K.mk')" && git add -A && git commit -q -m "$(printf 'a\033]0;t\007\302\233b')"
   cd ../host && git remote add sandbox-box ../agent
+  # A second sandbox whose git server sends a tree with a .git entry.
+  git init -q ../bad && cd ../bad && git commit -q --allow-empty -m init
+  git branch dotgit "$(git commit-tree "$(printf '100644 blob %s\t.git\n' "$(echo x | git hash-object -w --stdin)" | git mktree)" -m dotgit)"
+  cd ../host && git remote add sandbox-bad ../bad
 ) >/dev/null
 review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
+rc=0; out="$(cd "$TMP/host" && "$ROOT/bin/tartarus" review bad dotgit 2>&1)" || rc=$?
+[[ $rc != 0 && "$out" == *hasDotgit* && -z "$(git -C "$TMP/host" for-each-ref refs/remotes/sandbox-bad)" ]] \
+  || { echo "FAIL: review fetched a malformed object (exit $rc)"; echo "$out"; fails=1; }
+git -C "$TMP/host" fetch -q sandbox-bad 2>/dev/null && { echo "FAIL: a later fetch took the malformed object"; fails=1; }
 out="$(review safe)" || { echo "FAIL: review safe exited $?"; fails=1; }
 [[ "$out" == *"git branch <name> $(git -C "$TMP/agent" rev-parse safe)"* ]] || { echo "FAIL: review did not print the reviewed commit"; fails=1; }
 rc=0; out="$(review risky)" || rc=$?
@@ -242,8 +256,10 @@ if [[ $rc != 2 || "$out" != *".VSCode/tasks.json"* || "$out" != *".vscode/tâsks
   || "$out" != *"notes (symlink)"* || "${out#*REVIEW BEFORE}" == *workspace* ]]; then
   echo "FAIL: review sneaky (exit $rc)"; echo "$out"; fails=1
 fi
-git -C "$TMP/host" fetch -q --all
+git -C "$TMP/host" fetch -q sandbox-box
 [[ -z "$(git -C "$TMP/host" tag)" ]] || { echo "FAIL: review or a later fetch took the agent's tags"; fails=1; }
+rc=0; out="$(review orphan)" || rc=$?
+[[ $rc == 2 && "$out" == *".github/workflows/o.yml"* ]] || { echo "FAIL: review of an orphan branch (exit $rc)"; echo "$out"; fails=1; }
 rc=0; out="$(review nobranch)" || rc=$?
 [[ $rc == 1 && "$out" == *"it has:"*"  risky"* ]] || { echo "FAIL: review of a missing branch (exit $rc)"; echo "$out"; fails=1; }
 rc=0; out="$(cd "$TMP/host" && "$ROOT/bin/tartarus" review nobox x 2>&1)" || rc=$?
