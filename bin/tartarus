@@ -468,11 +468,17 @@ cmd_sign_kits() {
   openssl pkey -in "$SIGNING_KEY" -pubout 2>/dev/null | cmp -s - "$REPO_PUB" \
     || die "$SIGNING_KEY doesn't match kits/signing.pub; sign with the team key (TARTARUS_SIGNING_KEY)"
   local kit f
+  # Only what changed: signatures differ on every run, so re-signing the rest is diff noise.
   for kit in "$ROOT"/kits/*/; do
+    sbx kit verify --key "$REPO_PUB" "$kit" >/dev/null 2>&1 && continue
     # Sign first: with kit.requireSignature on, validate refuses an edited kit until it's re-signed.
     { sbx kit sign --key "$SIGNING_KEY" "$kit" && sbx kit validate "$kit"; } || die "signing $kit failed"
+    echo "tartarus: signed $kit"
   done
-  for f in "$ROOT"/policy/*.txt; do openssl dgst -sha256 -sign "$SIGNING_KEY" -out "$f.sig" "$f"; done
+  for f in "$ROOT"/policy/*.txt; do
+    (check_policy "$REPO_PUB" "$f") 2>/dev/null && continue
+    openssl dgst -sha256 -sign "$SIGNING_KEY" -out "$f.sig" "$f"; echo "tartarus: signed $f"
+  done
   echo "tartarus: commit kits/signing.pub, kits/*/kit.sig.bundle and policy/*.sig, then run tartarus setup"
 }
 
