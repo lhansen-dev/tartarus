@@ -1,15 +1,15 @@
 #!/bin/sh
 # shellcheck disable=SC2015 # pass/bad only echo, so A && B || C is safe here
 # Runs inside a sandbox (passed in by `tartarus verify`). Exits non-zero if any wall is down.
-# Args: newline-separated hosts that must be blocked, then host IPs to prove unreachable
-# (the host's LAN/VPN addresses).
+# Args: newline-separated hosts that must be blocked, newline-separated host paths tartarus
+# mounted, then host IPs to prove unreachable (the host's LAN/VPN addresses).
 # Runs as root: the agent's processes share the agent's uid, and with no Yama in the VM they could
 # ptrace a verify running as the agent and rewrite its results. Checks that need the agent's view
 # go through as_agent; the agent's files are only ever read. Only system dirs on PATH, and no rc
 # files or user site-packages (python3 -I, curl -q, root's HOME), so nothing the agent planted runs.
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 HOME=/root; export HOME
-blocked="$1"; shift
+blocked="$1"; mounted="$2"; shift 2
 fail=0
 pass() { echo "  ok    $1"; }
 bad() { echo "  FAIL  $1"; fail=1; }
@@ -158,7 +158,13 @@ fi
 # Host paths reach the VM over virtiofs; a read-write one is a host directory the agent can change
 # (an extra mounted with :rw, or a mount made outside tartarus).
 # mountinfo: optional fields come before the " - " separator, so find the fstype after it.
-rwhost="$(awk '{for (i = 7; i < NF; i++) if ($i == "-") break; if ($(i + 1) == "virtiofs" && $6 ~ /(^|,)rw(,|$)/) print $5}' /proc/self/mountinfo 2>/dev/null)"
+hostmounts() { awk -v want="$1" '{for (i = 7; i < NF; i++) if ($i == "-") break; if ($(i + 1) == "virtiofs" && (want == "" || $6 ~ /(^|,)rw(,|$)/)) print $5}' /proc/self/mountinfo 2>/dev/null; }
+rwhost="$(hostmounts rw)"
+# sbx mount adds host paths to a running sandbox (read-write by default), after every check
+# run made: anything beyond what tartarus mounted is one of those.
+extra="$(hostmounts | grep -vxF -e /run/sandbox/source -e /etc/resolv.conf | { if [ -n "$mounted" ]; then grep -vxF "$mounted"; else cat; fi; })"
+if [ -n "$extra" ]; then bad "host paths mounted outside tartarus (sbx mount?), as the VM sees them:"; echo "$extra" | sed 's/^/          /'
+else pass "no host mounts beyond tartarus's own"; fi
 if [ -n "$rwhost" ]; then echo "  info  writable host mounts (fine if you passed :rw):"; echo "$rwhost" | sed 's/^/          /'
 else pass "no writable host mounts"; fi
 if [ -d /run/sandbox/source ]; then

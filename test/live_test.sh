@@ -76,6 +76,8 @@ for h in "${harnesses[@]}"; do
     "$T" audit >/dev/null 2>&1 && bad "audit missed a removed deny ($deny)" || ok "audit catches a removed deny"
     sbx policy deny network --sandbox "$box" "$deny" >/dev/null 2>&1
   fi
+  mkdir -p "$TMP/sneak"; sbx mount "$box" "$TMP/sneak" >/dev/null 2>&1 || bad "sbx mount"
+  "$T" verify "$box" >/dev/null 2>&1 && bad "verify missed a host path added with sbx mount" || ok "verify catches sbx mount"
   sbx kit add "$box" "$ROOT/kits/registries" >/dev/null 2>&1 || bad "kit add"
   "$T" audit >/dev/null 2>&1 && bad "audit missed an added kit" || ok "audit catches a kit added later"
 

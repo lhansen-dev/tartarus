@@ -437,6 +437,8 @@ $(sanitize <<<"$report")"
   fi
   # The lockdown for tartarus ls; the registries flag for audit, which checks the harness denies.
   mkdir -p "$CONFIG/sandboxes" && echo "$fp $lockdown ${TARTARUS_REGISTRIES:-0}" > "$record"
+  # The host paths it mounts, for verify: sbx mount can add more to a running sandbox later.
+  printf '%s\n' "${mounts[@]:1}" | sed 's/:r[ow]$//' > "$CONFIG/sandboxes/$name.mounts"
   # Create detached, so the allows can be recorded before anything else touches the sandbox
   # (audit fails if they grow, e.g. by sbx kit add), then attach.
   args+=(--name "$name" --detach "$agent" "${paths[@]}")
@@ -674,7 +676,7 @@ cmd_rm() {
     # Clean the sandbox's own repo, from sbx's record of its workspace, wherever rm runs from.
     repo="$(sandbox_repo "$name")"
     sbx rm --force "$name"
-    rm -f "$CONFIG/sandboxes/$name" "$CONFIG/sandboxes/$name".{allows,created}
+    rm -f "$CONFIG/sandboxes/$name" "$CONFIG/sandboxes/$name".{allows,created,mounts}
     [[ -n "$repo" ]] && drop_sandbox_refs "$repo" "$name"
     drop_sandbox_refs . "$name"
   done
@@ -709,7 +711,8 @@ cmd_verify() {
   # As root: the agent's own processes could ptrace one running as the agent.
   for name in "${names[@]}"; do
     ((${#names[@]} == 1)) || echo "== $name"
-    sbx exec -u root "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" "${ips[@]}" 127.0.0.1 || fail=1
+    sbx exec -u root "$name" sh -c "$(cat "$ROOT/libexec/verify-inside.sh")" verify-inside "$blocked" \
+      "$(cat "$CONFIG/sandboxes/$name.mounts" 2>/dev/null)" "${ips[@]}" 127.0.0.1 || fail=1
     echo "Review egress with: sbx policy log $name"
   done
   return "$fail"
