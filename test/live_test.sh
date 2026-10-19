@@ -30,6 +30,18 @@ for h in "${harnesses[@]}"; do
   "$T" run "$h" --name "$box" --detach >/dev/null 2>&1 && ok "sandbox created" || { bad "run $h"; continue; }
   "$T" verify "$box" >"$TMP/verify" 2>&1 && ok "verify passes" || { bad "verify:"; grep FAIL "$TMP/verify"; }
 
+  # The lockdown mustn't break the agent: a small task with a tool call (uses the model credential).
+  task='Create hello.txt containing hi using a tool, then reply DONE'
+  case "$h" in
+    claude) agent=(env CLAUDE_CODE_TMPDIR=/home/agent/tmp claude -p --dangerously-skip-permissions "$task") ;;
+    codex) agent=(codex exec --skip-git-repo-check "$task") ;;
+    *) agent=() ;;
+  esac
+  if ((${#agent[@]})); then
+    sbx exec "$box" sh -c 'mkdir -p ~/tmp ~/live && cd ~/live && "$@" >/dev/null 2>&1; grep -qx hi hello.txt' sh "${agent[@]}" \
+      && ok "agent completes a tool task" || bad "agent couldn't complete a tool task (logged in? tartarus login $h)"
+  fi
+
   # No root, and no way to get it on the next start.
   expect_fail "sudo" "$box" 'sudo -n true'
   expect_fail "a command planted on root's PATH" "$box" 'printf "#!/bin/sh\n" > ~/.local/bin/mkdir'

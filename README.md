@@ -67,5 +67,6 @@ It keeps the agent away from your host, your secrets and prod: no network beyond
 ```sh
 bash test/tartarus_test.sh    # uses a stub sbx; no sandboxes are created. Runs shellcheck if installed
 tartarus verify <sandbox>     # the live check: run it on a real sandbox after changing a kit or policy
-bash test/live_test.sh        # real sandboxes, attacked like a hijacked agent would (needs setup and logins)
+bash test/live_test.sh        # real sandboxes: a small agent task, then attacks a hijacked agent would try
+                              # (needs setup and logins; spends a little model usage)
 ```
