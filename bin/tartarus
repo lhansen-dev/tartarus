@@ -10,6 +10,7 @@ CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/tartarus"
 SIGNING_KEY="${TARTARUS_SIGNING_KEY:-$CONFIG/kit-signing.key}"  # private; never in the repo
 REPO_PUB="$ROOT/kits/signing.pub"                                # published with the kits
 PINNED_PUB="$CONFIG/kit-signing.pub"                             # what setup told sbx to trust
+SIGNERS="$CONFIG/trusted-signers.json"                           # the full signer list setup set
 CPUS="${TARTARUS_CPUS:-4}"
 MEMORY="${TARTARUS_MEMORY:-8g}"
 
@@ -20,6 +21,10 @@ SETTINGS=(
   claude.remoteControl=false        # remote-control is an inbound channel to the agent
   env.rememberHostCommands=false    # every host command an env runs needs fresh approval
   skills.defaultMode=off            # no host skills store linked into sandboxes
+  ssh.autoCreate=false              # an SSH connect must not create a sandbox outside tartarus
+  kit.ignoreTransparencyLog=false   # keyless kit signatures must be in the transparency log
+  tls.allowNegativeSerial=false     # no relaxed certificate checks on the proxy
+  diagnostics.autoUpload=no         # error bundles hold logs and paths; never upload them
 )
 
 usage() {
@@ -52,6 +57,7 @@ EOF
 }
 
 die() { echo "tartarus: $*" >&2; exit 1; }
+json_eq() { python3 -c 'import json, sys; sys.exit(json.loads(sys.argv[1]) != json.loads(sys.argv[2]))' "$1" "$2" 2>/dev/null; }
 indent() { while IFS= read -r line; do echo "          $line"; done <<<"$1"; }
 
 # Per-harness wiring. Agent names and defaults are sbx's own: copilot --yolo,
@@ -73,7 +79,8 @@ cmd_setup() {
   for kv in "${SETTINGS[@]}"; do sbx settings set "${kv%%=*}" "${kv#*=}"; done
   sbx settings set kit.allowedSources "$KIT_SOURCES"
   # Rebuild the global policy from scratch so stale allows can't survive a re-run.
-  sbx policy reset --force
+  # In a terminal, reset asks for a policy itself, which then makes init fail; no stdin, no prompt.
+  sbx policy reset --force </dev/null
   sbx policy init deny-all
   deny_hosts | while read -r host; do sbx policy deny network "$host"; done
   # With a team key, only kits it signed (plus Docker's built-in agents) can be installed. The
@@ -86,6 +93,7 @@ cmd_setup() {
 import json, sys
 print(json.dumps(json.load(sys.stdin) + [{"key": sys.argv[1]}]))' "$PINNED_PUB")"
     sbx settings set kit.trustedSigners "$signers"
+    printf '%s\n' "$signers" > "$SIGNERS"
     sbx settings set kit.requireSignature true
   else
     echo "tartarus: no kits/signing.pub; kit signatures not enforced (see: tartarus sign-kits)"
@@ -101,12 +109,13 @@ cmd_audit() {
     [[ "$got" == "${kv#*=}" ]] || { echo "  FAIL  ${kv%%=*} is '$got', want '${kv#*=}'"; fail=1; }
   done
   # Global network allows widen every sandbox past its kit; deny-all has none.
-  local allows
-  allows="$(sbx policy ls --json | python3 -c '
+  local policy allows
+  policy="$(sbx policy ls --json)"
+  allows="$(python3 -c '
 import json, sys
 rules = json.load(sys.stdin)["rules"]
 print("\n".join(", ".join(r["resources"]) for r in rules
-  if r["scope"] == "global" and r["resource_type"] == "network" and r["decision"] == "allow"))')"
+  if r["scope"] == "global" and r["resource_type"] == "network" and r["decision"] == "allow"))' <<<"$policy")"
   [[ -z "$allows" ]] || { echo "  FAIL  global network allows: $allows"; fail=1; }
   # Approving a blocked-request prompt saves a permanent allow; agents can trigger prompts on purpose.
   local approved
@@ -118,14 +127,21 @@ print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if 
   local pending
   pending="$(sbx policy approval ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
   ((pending == 0)) || echo "  info  $pending pending approval prompt(s): dismiss them, don't allow (sbx policy approval ls)"
-  local host
-  while read -r host; do
-    [[ -z "$host" ]] && continue
-    sbx policy ls --json | grep -qF "\"$host\"" || { echo "  FAIL  deny rule missing: $host"; fail=1; }
-  done < <(deny_hosts)
+  # A host named only in an allow rule doesn't count; it must be in a global deny.
+  local missing hosts; mapfile -t hosts < <(deny_hosts)
+  missing="$(python3 -c '
+import json, sys
+denied = {h for r in json.load(sys.stdin)["rules"] if r["scope"] == "global" and r["decision"] == "deny" for h in r["resources"]}
+print("\n".join(h for h in sys.argv[1:] if h not in denied))' "${hosts[@]}" <<<"$policy")"
+  [[ -z "$missing" ]] || { echo "  FAIL  deny rules missing:"; indent "$missing"; fail=1; }
+  json_eq "$(sbx settings get kit.allowedSources 2>/dev/null)" "$KIT_SOURCES" \
+    || { echo "  FAIL  kit.allowedSources is not $KIT_SOURCES"; fail=1; }
   if [[ -f "$REPO_PUB" ]]; then
     [[ "$(sbx settings get kit.requireSignature)" == true ]] || { echo "  FAIL  kit.requireSignature is off"; fail=1; }
     cmp -s "$REPO_PUB" "$PINNED_PUB" || { echo "  FAIL  kits/signing.pub differs from the key setup pinned ($PINNED_PUB)"; fail=1; }
+    # An extra signer would let kits signed by anyone else in.
+    json_eq "$(sbx settings get kit.trustedSigners 2>/dev/null)" "$(cat "$SIGNERS" 2>/dev/null)" \
+      || { echo "  FAIL  kit.trustedSigners differs from what setup set ($SIGNERS)"; fail=1; }
     local kit
     for kit in "$ROOT"/kits/*/; do
       sbx kit verify --key "$PINNED_PUB" "$kit" >/dev/null 2>&1 \
@@ -170,12 +186,15 @@ cmd_run() {
       --name) [[ $# -ge 2 ]] || die "--name needs a value"; args+=(--name "$2"); shift 2 ;;
       --detach|-d) args+=(--detach); shift ;;
       --) shift; rest=("$@"); break ;;
+      # sbx parses flags anywhere, so a stray --kit or --skills would reach it as a path.
+      -*) die "unknown option $1 (prefix a path that starts with - with ./)" ;;
       *) paths+=("$1"); shift ;;
     esac
   done
   ((${#paths[@]})) || paths=(.)
-  local i primary extra
+  local i primary extra home
   primary="$(realpath -m "${paths[0]}")"
+  home="$(realpath -m "$HOME")"
   # sbx ignores creation flags when it re-attaches to an existing sandbox, so the default name
   # carries a fingerprint of the lockdown config: harden tartarus and you get a fresh sandbox.
   if [[ " ${args[*]} " != *" --name "* ]]; then
@@ -191,6 +210,9 @@ cmd_run() {
     # An extra containing the repo would mount it directly, bypassing clone mode.
     [[ "$primary/" == "$extra/"* || "$extra/" == "$primary/"* ]] \
       && die "extra path ${paths[i]} overlaps the repo $primary; mount siblings only"
+    # Home dotdirs hold keys and tokens (.ssh, .aws, .config, .kube); read-only still leaks them.
+    [[ "$home/" == "$extra/"* || "$extra" == "$home"/.* ]] \
+      && die "extra path ${paths[i]} is or holds your home's dotfiles (keys, tokens); refused"
     case "${paths[i]}" in
       *:rw) paths[i]="${paths[i]%:rw}" ;;
       *:ro) ;;
@@ -204,8 +226,9 @@ cmd_run() {
 
 # Files that run code on the host when you build, test, open or commit: the trust-handoff path.
 # Agent instruction files are included: text an agent plants there steers the next agent you
-# run on the host, outside the sandbox. Dependency manifests run code when installed.
-RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.buildkite/|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.cursor/|\.mcp\.json|CLAUDE\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.envrc|\.direnv/|mise\.toml|\.mise\.toml|\.tool-versions|flake\.nix|shell\.nix|default\.nix|\.npmrc|\.yarnrc|\.pnpmfile|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|.*\.gradle(\.kts)?$|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|requirements.*\.txt|Pipfile|conftest\.py|tox\.ini|noxfile\.py|Gemfile|.*\.gemspec$|Rakefile|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules)'
+# run on the host, outside the sandbox. Dependency manifests run code when installed. JS tool
+# configs (eslint, vite, jest...) are code that IDEs and linters load on open.
+RISKY_PATHS='(^|/)(\.git/|\.githooks/|\.husky/|\.github/|\.gitlab-ci|\.circleci/|Jenkinsfile|\.buildkite/|\.vscode/|\.idea/|\.devcontainer/|\.claude/|\.codex/|\.cursor/|\.mcp\.json|CLAUDE\.md|AGENTS\.md|GEMINI\.md|\.cursorrules|\.windsurfrules|\.envrc|\.direnv/|mise\.toml|\.mise\.toml|\.tool-versions|flake\.nix|shell\.nix|default\.nix|\.npmrc|\.yarnrc|\.pnpmfile|\.pre-commit|lefthook|Makefile|makefile|GNUmakefile|.*\.mk$|justfile|Taskfile|package\.json|.*\.gradle(\.kts)?$|gradlew|mvnw|pom\.xml|setup\.py|setup\.cfg|pyproject\.toml|requirements.*\.txt|Pipfile|conftest\.py|tox\.ini|noxfile\.py|Gemfile|.*\.gemspec$|Rakefile|Cargo\.toml|build\.rs|go\.mod|CMakeLists\.txt|Dockerfile|docker-compose|compose\.ya?ml|\.gitattributes|\.gitmodules|\.lfsconfig|\.cargo/|\.yarn/|bunfig\.toml|deno\.jsonc?$|\.bazelrc|BUILD(\.bazel)?$|WORKSPACE(\.bazel)?$|MODULE\.bazel|meson\.build|configure(\.ac)?$|pytest\.ini|sitecustomize\.py|usercustomize\.py|.*\.pth$|.*\.config\.[cm]?[jt]s$|\.[a-z]+rc\.[cm]?js$|\.zed/|\.gemini/|\.aider|\.continue/|\.windsurf/|\.clinerules|\.exrc|\.nvimrc|\.nvim\.lua|.*\.code-workspace$)'
 
 cmd_review() {
   local name="${1:-}" branch="${2:-}"
@@ -220,8 +243,13 @@ cmd_review() {
   base="$(git rev-parse --abbrev-ref HEAD)"
   git log --oneline "$base..$remote/$branch"
   git diff --stat "$base...$remote/$branch"
-  local risky
-  risky="$(git diff --name-only "$base...$remote/$branch" | grep -E "$RISKY_PATHS" || true)"
+  # -z: no quoting of odd names to slip past ^; --no-renames: list both ends of a move;
+  # -i: case-insensitive filesystems (macOS) open .VSCode/ as .vscode/.
+  local risky links
+  risky="$(git diff --no-renames --name-only -z "$base...$remote/$branch" | grep -izE "$RISKY_PATHS" | tr '\0' '\n' || true)"
+  # A symlink can point a build or IDE at any host file once checked out.
+  links="$(git diff --no-renames --raw "$base...$remote/$branch" | awk -F'\t' 'index($1, " 120000 ") {print $2 " (symlink)"}')"
+  risky="$(printf '%s\n%s' "$risky" "$links" | sed '/^$/d')"
   if [[ -n "$risky" ]]; then
     echo; echo "REVIEW BEFORE CHECKOUT, BUILD OR OPENING IN AN IDE (these run code on the host):"
     printf '%s\n' "$risky" | sed 's/^/  /'

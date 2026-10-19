@@ -28,6 +28,9 @@ check "run gemini" ""
 check "run claude ~/a/repo ~/a" ""        # extra contains the repo: refused
 check "run claude ~/a ~/a/sub:rw" ""      # extra inside the repo: refused
 check "run claude ~/a ~/ab" "sbx $R $DC claude $HOME/a $HOME/ab:ro"  # prefix-named sibling is fine
+check "run claude --kit evil ." ""        # unknown option: refused, not passed to sbx as a path
+check "run claude ~/a ~/.ssh" ""          # home dotdir: refused
+check "run claude /srv/a $HOME" ""        # all of home: refused
 check "rm a b" "sbx rm --force b"
 check "login codex" "sbx secret set openai --oauth"
 check "login copilot" "sbx secret set copilot"
@@ -57,6 +60,8 @@ n1="$(name_of X=1)"; n2="$(name_of X=1)"; n3="$(name_of TARTARUS_CPUS=2)"
   git clone -q host agent && cd agent
   git checkout -q -b safe && echo hi > README.md && git add -A && git commit -q -m safe
   git checkout -q -b risky && mkdir -p .github/workflows src && touch .github/workflows/ci.yml src/package.json CLAUDE.md docs.md && git add -A && git commit -q -m risky
+  git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
+  ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
   cd ../host && git remote add sandbox-box ../agent
 ) >/dev/null
 review() { (cd "$TMP/host" && "$ROOT/bin/tartarus" review box "$1" 2>&1); }
@@ -64,6 +69,11 @@ out="$(review safe)" || { echo "FAIL: review safe exited $?"; fails=1; }
 rc=0; out="$(review risky)" || rc=$?
 if [[ $rc != 2 || "$out" != *".github/workflows/ci.yml"* || "$out" != *"src/package.json"* || "$out" != *"  CLAUDE.md"* || "${out#*REVIEW BEFORE}" == *docs.md* || "${out#*REVIEW BEFORE}" == *README* ]]; then
   echo "FAIL: review risky (exit $rc)"; echo "$out"; fails=1
+fi
+rc=0; out="$(review sneaky)" || rc=$?
+if [[ $rc != 2 || "$out" != *".VSCode/tasks.json"* || "$out" != *".vscode/tâsks.json"* || "$out" != *"eslint.config.mjs"* \
+  || "$out" != *"notes (symlink)"* || "${out#*REVIEW BEFORE}" == *workspace* ]]; then
+  echo "FAIL: review sneaky (exit $rc)"; echo "$out"; fails=1
 fi
 
 ((fails)) && exit 1

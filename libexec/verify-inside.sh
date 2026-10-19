@@ -60,7 +60,8 @@ echo "egress"
 [ "$(tcp gateway.docker.internal 3128)" = open ] && pass "TCP probe detects an open port (proxy)" \
   || echo "  warn  TCP probe can't see the proxy; direct TCP results below may be false passes"
 for url in https://example.com http://example.com https://s3.amazonaws.com https://storage.googleapis.com \
-  https://gitlab.com https://pastebin.com http://169.254.169.254/latest/meta-data/; do
+  https://gitlab.com https://pastebin.com http://169.254.169.254/latest/meta-data/ \
+  https://dns.google/resolve?name=example.com https://cloudflare-dns.com/dns-query; do  # DoH: DNS past the policy
   code="$(http "$url")"
   case "$code" in 000|403) pass "blocked $url ($code)" ;; *) bad "reached $url ($code)" ;; esac
 done

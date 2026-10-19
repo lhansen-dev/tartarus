@@ -99,7 +99,7 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
 2. **Harden the machine:** `tartarus setup`. It rebuilds `sbx`'s host configuration from scratch, so it's safe to re-run:
 
    ```bash
-   sbx settings set ssh.agentForwardingEnabled false   # plus clipboard, remote control, skills: see Lockdown layers
+   sbx settings set ssh.agentForwardingEnabled false   # plus clipboard, remote control, skills, SSH auto-create, diagnostics upload: see Lockdown layers
    sbx settings set kit.allowedSources '["docker.io/sbx/"]'
    sbx policy reset --force && sbx policy init deny-all
    sbx policy deny network "<each host in policy/deny.txt>"
@@ -112,7 +112,7 @@ Setup is four commands per machine, plus the `tartarus` repo the team maintains 
    - **Network:** under `deny-all`, the global policy allows nothing. Each sandbox gets only its harness kit's vendor endpoints plus the baseline kit's npm and PyPI [9], [11]. Private IP ranges, loopback and link-local addresses are blocked regardless [17]. `policy/deny.txt` is for prod endpoints with public addresses, such as public APIs and cloud control planes.
    - **Kits:** only kits signed by the team key, plus Docker's own, can be installed. Kits run code inside the sandbox [8].
 
-   `tartarus audit` checks all of this at any time, and `tartarus verify` runs it automatically.
+   `tartarus audit` checks all of this at any time, including that no extra kit signer or kit source was added since setup, and `tartarus verify` runs it automatically.
 3. **Give the sandbox only the model credential:** `tartarus login <harness>`.
    - **Copilot:** stores only the `copilot` secret (`COPILOT_GITHUB_TOKEN`, injected for `*.githubcopilot.com` and `copilot.github.com`). We deliberately skip the kit's `github` secret (`GH_TOKEN`, injected for `github.com`) [21]: our code lives on our own GitHub server, and the agent shouldn't push anywhere. `audit` fails if a `github` secret is ever stored.
    - **Claude Code:** sign in with `/login` inside the sandbox (OAuth, token stays on the host), or store an API key with `sbx secret set anthropic` [22], [28].
@@ -178,7 +178,11 @@ Fetching isn't approval. Before checking out, building, or opening the branch in
 - dependency manifests;
 - environment managers such as `direnv`, `mise` and Nix;
 - harness config that runs commands (`.claude/`, `.codex/`, `.mcp.json`);
-- agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`). These are prompt injection aimed at the next agent you run on the host, outside the sandbox.
+- JS tool configs (`eslint.config.js`, `vite.config.ts`, `.prettierrc.js`), which IDEs and linters run on open, and Python startup hooks (`.pth`, `sitecustomize.py`);
+- agent instruction files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`). These are prompt injection aimed at the next agent you run on the host, outside the sandbox;
+- every added or changed symlink, which can point a build or IDE at any host file.
+
+Matching is case-insensitive (macOS opens `.VSCode/` as `.vscode/`), and both ends of a rename are checked.
 
 Then push the branch to our server as usual.
 
@@ -230,7 +234,7 @@ Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 with Claude Cod
 | No root for the agent (`no-root` kit) | Guest root is the first step of any attack on the VM boundary | `sudo` asks for a password (the agent's is locked), and `docker ps` is denied. `sbx exec` re-adds the `sudo` and `docker` groups to every session, so the control is on the grants themselves. Holds across restarts |
 | Clipboard bridge removed | The image runs `clipboard-bridge`, a Wayland clipboard-control server bridged towards the host | The bridge process and socket are gone after start and after restart. `clipboard.imagePaste=false` is pinned on the host as well |
 | Host skills off | The host skills store linked into every sandbox | `--skills off` and `skills.defaultMode=off` |
-| Clone mode plus read-only extras | The agent writing the host repo, its hooks or its config | The host repo's working tree, `.git/hooks` and `HEAD` were unchanged after agent commits, and writing to the source mount fails. Extras default to `:ro`, and overlapping mounts are refused |
+| Clone mode plus read-only extras | The agent writing the host repo, its hooks or its config | The host repo's working tree, `.git/hooks` and `HEAD` were unchanged after agent commits, and writing to the source mount fails. Extras default to `:ro`, and overlapping mounts are refused, as are your home directory and its dotdirs (`~/.ssh`, `~/.aws`, `~/.config`) |
 | Fingerprinted sandbox names | Re-attaching to an older sandbox, where `sbx` silently ignores the new flags | `verify` on a sandbox from before the deny lists fails: the connector proxy is reachable there |
 | Signed kits | A modified kit, which runs code in every sandbox | Signed kits install. After a one-line edit without re-signing, `sbx` and `audit` both refuse |
 | Approval prompts | Each blocked request becomes a pending prompt, and one click saves a permanent allow. An agent can trigger prompts on purpose | `audit` fails on any allow created by an approval (tested by approving `example.org` on a probe). Dismiss prompts, never allow them |
@@ -248,7 +252,7 @@ Every layer below was tested against `sbx` v0.48.0 on 2026-10-18 with Claude Cod
 | The vendor API is an open channel | The agent must reach its own model API, and with OAuth it acts as you there (for example, Codex reaches `chatgpt.com`) | Inherent to running the agent at all. Deny everything else (done), and prefer API keys scoped to a team project over personal subscriptions |
 | Persistent sandboxes | A sandbox, including anything a compromised agent planted in its home, persists across sessions for the same repo and lockdown | `tartarus rm` after merging work; a fresh sandbox per task for untrusted inputs |
 | Public prod endpoints | Private ranges are blocked [17], but public prod APIs and cloud control planes are reachable if a rule allows them | `policy/deny.txt`; review `sbx policy log` |
-| Allowlist creep | Every domain added to the kits, and every approved prompt, is a possible exfiltration path [16] | Keep `team-baseline` short. `audit` fails on approval-created allows |
+| Allowlist creep | Every domain added to the kits, and every approved prompt, is a possible exfiltration path [16]. Even the npm registry is one: `npm publish` with a token an attacker plants in a prompt uploads to it | Keep `team-baseline` short. `audit` fails on approval-created allows. Drop `registry.npmjs.org` from the kit for repos that don't need it |
 | Credentials passed in | Anything we give the sandbox is usable inside it | One model credential per harness; SSH forwarding off; no `github` secret (audited); no global registry secrets |
 | CI as a path to prod | A pushed branch may trigger deploys or expose prod secrets | Branch protection and a CI trigger audit (see Git workflow) |
 | Harness drift | Three harnesses change their flags, auth and defaults independently | Rely on `sbx`'s own per-agent defaults; Tartarus only picks the credential and kit |
