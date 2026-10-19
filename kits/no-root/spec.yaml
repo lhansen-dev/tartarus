@@ -1,0 +1,24 @@
+# Takes root away from the agent inside the sandbox: no sudo, no Docker socket.
+# The microVM is the real boundary; this keeps guest root, the usual first step of any
+# attack on that boundary, out of the agent's hands. Package installs are already blocked
+# by the deny-all policy, so sudo buys the agent little. Opt out with TARTARUS_ALLOW_ROOT=1.
+# The host can still get root in a sandbox with: sbx exec -u root <name> ...
+schemaVersion: "2"
+kind: mixin
+name: no-root
+description: Remove sudo and Docker access from the agent user
+
+setup:
+  startup:
+    - command:
+        - sh
+        - -c
+        # sbx exec adds the sudo and docker groups to every session whatever /etc/group says,
+        # so close the grants themselves: the sudoers entry and the Docker socket's group access.
+        # The agent's password is locked (!), so group sudo alone can't authenticate.
+        - >-
+          rm -f /etc/sudoers.d/agent;
+          for i in $(seq 30); do [ -S /var/run/docker.sock ] && break; sleep 1; done;
+          chmod 600 /var/run/docker.sock; true
+      user: "0"
+      description: Drop the agent's sudo grant and Docker socket access

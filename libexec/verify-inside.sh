@@ -36,6 +36,10 @@ if ssh-add -l >/dev/null 2>&1; then bad "SSH agent reachable"; else pass "no SSH
 if command -v kubectl >/dev/null && kubectl config current-context >/dev/null 2>&1; then
   bad "kube context set"; else pass "no kube context"; fi
 
+if [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; then echo "  info  agent has root (TARTARUS_ALLOW_ROOT=1?)"
+else pass "agent has no root"; fi
+if docker ps >/dev/null 2>&1; then echo "  info  agent can use Docker (root in the guest)"; fi
+
 echo "host surfaces"
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/1000}/wayland-0" ] || pgrep -f '^/usr/local/bin/clipboard-bridge' >/dev/null; then
   bad "clipboard bridge present"; else pass "no clipboard bridge"; fi

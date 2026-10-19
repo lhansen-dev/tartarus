@@ -39,7 +39,7 @@ Usage: tartarus <command> [args]
   safe <harness> [args]         Run the harness on the host in a scrubbed env (when sbx is not an option)
 
 Harnesses: copilot, claude, codex
-Env: TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
+Env: TARTARUS_ALLOW_ROOT=1 (keep sudo/Docker for the agent), TARTARUS_CPUS (4), TARTARUS_MEMORY (8g), TARTARUS_BASELINE_KIT, TARTARUS_KIT_SOURCES, TARTARUS_DENY_FILE
 EOF
 }
 
@@ -113,6 +113,7 @@ cmd_run() {
   local harness="${1:-}"; [[ -n "$harness" ]] || die "run needs a harness"; shift
   local kit; kit="$(harness_kit "$harness")"
   local args=(run --clone --skills off --cpus "$CPUS" --memory "$MEMORY" --kit "$BASELINE_KIT")
+  [[ "${TARTARUS_ALLOW_ROOT:-}" == 1 ]] || args+=(--kit "$ROOT/kits/no-root")
   [[ -n "$kit" ]] && args+=(--kit "$kit")
   local host
   # Narrow the harness kit's own allows (connectors, remote control, GitHub) for this sandbox.
@@ -134,8 +135,8 @@ cmd_run() {
   if [[ " ${args[*]} " != *" --name "* ]]; then
     local fp
     # A remote kit (git/OCI URL) has no local spec; its pinned ref in the URL stands in for it.
-    fp="$({ cat "$0" "$ROOT"/policy/*.txt; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
-      echo "$BASELINE_KIT $CPUS $MEMORY"; } | cksum | cut -d' ' -f1)"
+    fp="$({ cat "$0" "$ROOT"/policy/*.txt "$ROOT"/kits/no-root/spec.yaml; cat "$BASELINE_KIT/spec.yaml" 2>/dev/null || true
+      echo "$BASELINE_KIT $CPUS $MEMORY ${TARTARUS_ALLOW_ROOT:-}"; } | cksum | cut -d' ' -f1)"
     args+=(--name "tartarus-$harness-$(basename "$primary")-$fp")
   fi
   # Clone mode only protects the first path; extras are direct mounts, so default them to :ro.

@@ -16,7 +16,7 @@ check() { # check "<tartarus args>" "<expected last sbx line>"
   if [[ "$got" != "$2" ]]; then echo "FAIL: tartarus $1"; echo "  want: $2"; echo "  got:  $got"; fails=1; fi
 }
 
-R="run --clone --skills off --cpus 4 --memory 8g --kit KIT"
+R="run --clone --skills off --cpus 4 --memory 8g --kit KIT --kit $ROOT/kits/no-root"
 DC="--deny-network mcp-proxy.anthropic.com --deny-network bridge.claudeusercontent.com"
 DC+=" --deny-network downloads.claude.ai --deny-network claude.ai --deny-network console.anthropic.com"
 DX="--deny-network github.com --deny-network api.github.com --deny-network codeload.github.com"
