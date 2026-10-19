@@ -172,7 +172,7 @@ done
 # The proxy runs on the host, so loopback in any spelling sent through it must not reach host
 # services (no_proxy would otherwise skip the proxy for these). localtest.me resolves to 127.0.0.1.
 proxy="${http_proxy:-${HTTP_PROXY:-}}"
-for url in http://127.0.0.1:11434/ http://localhost:8080/ 'http://[::1]:11434/' http://0.0.0.0:8080/ http://127.1:11434/ \
+for url in http://127.0.0.1:11434/ http://localhost:8080/ 'http://[::1]:11434/' 'http://[::ffff:127.0.0.1]:8080/' http://0.0.0.0:8080/ http://127.1:11434/ \
   http://2130706433:8080/ http://localtest.me:11434/; do
   code="$(curl -q -s -o /dev/null -m 8 -x "$proxy" -w '%{http_code}' "$url" 2>/dev/null)"
   case "$code" in 000|403) pass "proxy refuses host loopback $url ($code)" ;; *) bad "proxy reached host loopback $url ($code)" ;; esac
