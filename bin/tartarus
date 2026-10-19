@@ -507,6 +507,10 @@ RISKY=(
 )
 RISKY_PATHS="(^|/)($(IFS='|'; echo "${RISKY[*]}"))"
 
+# Credential shapes: JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens,
+# private keys. libexec/verify-inside.sh scans the sandbox for the same ones.
+TOKEN_RE='eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY'
+
 # Commit messages and file names come from the agent: escape sequences in them could erase or
 # fake the warnings below, so control characters (C0, DEL and C1) print as '?'.
 sanitize() { python3 -c '
@@ -573,18 +577,18 @@ except subprocess.TimeoutExpired: sys.exit("fetch took over 10 minutes")' git -c
   local leaks
   leaks="$(git diff --no-ext-diff --no-textconv -U0 "${range[@]}" | python3 -c '
 import re, sys
-pat = re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY")
+pat = re.compile(sys.argv[1])
 f = ""
 for line in sys.stdin:
     if line.startswith("+++ "): f = line[6:].rstrip("\n") if line.startswith("+++ b/") else ""
-    elif line.startswith("+") and pat.search(line): print(f + " (credential-shaped string)")' | sort -u)"
+    elif line.startswith("+") and pat.search(line): print(f + " (credential-shaped string)")' "$TOKEN_RE" | sort -u)"
   # Commit messages and author fields are pushed too.
   leaks+=$'\n'"$(git log --format='%H %an %ae %cn %ce %B%x00' "HEAD..$tip" | python3 -c '
 import re, sys
-pat = re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY")
+pat = re.compile(sys.argv[1])
 for c in sys.stdin.read().split("\0"):
     c = c.strip()
-    if c and pat.search(c): print("commit %s message or author (credential-shaped string)" % c[:12])')"
+    if c and pat.search(c): print("commit %s message or author (credential-shaped string)" % c[:12])' "$TOKEN_RE")"
   risky="$(printf '%s\n%s' "$risky" "$leaks" | sed '/^$/d')"
   # The list only covers files that run on their own. Running tests or the app runs every changed file.
   local after="Every changed file runs once you test, build or start the app on the host: read the whole
