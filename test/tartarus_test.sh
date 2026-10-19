@@ -346,7 +346,7 @@ grep -qE '^registry\.npmjs\.org( |$)' "$TMP/log" && { echo "FAIL: verify require
   mkdir -p App.xcodeproj .run && touch App.xcodeproj/project.pbxproj .Rprofile .ghci .iex.exs .run/app.xml .gitpod.yml Earthfile
   git add -A && git update-index --add --cacheinfo 160000,"$(git rev-parse HEAD)",vendor/dep && git commit -q -m more
   git checkout -q -b leak safe && mkdir -p src && printf 'key = "AKIA%s"\n' ABCDEFGHIJKLMNOP > src/settings.py
-  git add -A && git commit -q -m leak && git commit -q --allow-empty -m "token ghp_$(printf 'a%.0s' $(seq 36))"
+  head -c 2000000 /dev/zero > dump.bin && git add -A && git commit -q -m leak && git commit -q --allow-empty -m "token ghp_$(printf 'a%.0s' $(seq 36))"
   git checkout -q -b sneaky safe && mkdir -p .VSCode .vscode src/workspace && touch .VSCode/tasks.json .vscode/tâsks.json eslint.config.mjs src/workspace/a.ts
   ln -s ~/.bashrc notes && git add -A && git commit -q -m sneaky
   # A tag named main at the risky commit would make the review diff risky against itself.
@@ -387,6 +387,7 @@ fi
 git -C "$TMP/host" fetch -q sandbox-box
 [[ -z "$(git -C "$TMP/host" tag)" ]] || { echo "FAIL: review or a later fetch took the agent's tags"; fails=1; }
 rc=0; out="$(review leak)" || rc=$?
+[[ "$out" == *"dump.bin (1.9 MiB)"* ]] || { echo "FAIL: review didn't name a large file"; echo "$out"; fails=1; }
 [[ $rc == 2 && "$out" == *"src/settings.py (credential-shaped string)"* && "$out" == *"message or author (credential-shaped string)"* ]] || { echo "FAIL: review missed a committed key (exit $rc)"; echo "$out"; fails=1; }
 rc=0; out="$(review orphan)" || rc=$?
 [[ $rc == 2 && "$out" == *".github/workflows/o.yml"* ]] || { echo "FAIL: review of an orphan branch (exit $rc)"; echo "$out"; fails=1; }
