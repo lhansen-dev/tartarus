@@ -316,7 +316,7 @@ fi
 
 [[ "$(git -C "$ROOT" config --local -l 2>/dev/null || true)" == "$own_config" ]] || { echo "FAIL: the tests changed this repo's git config"; fails=1; }
 if command -v shellcheck >/dev/null; then
-  shellcheck -S warning "$ROOT/bin/tartarus" "$ROOT/libexec/verify-inside.sh" "$ROOT/test/tartarus_test.sh" || { echo "FAIL: shellcheck"; fails=1; }
+  shellcheck -S warning "$ROOT/bin/tartarus" "$ROOT/libexec/verify-inside.sh" "$ROOT/test/tartarus_test.sh" "$ROOT/test/live_test.sh" || { echo "FAIL: shellcheck"; fails=1; }
 fi
 
 ((fails)) && exit 1
