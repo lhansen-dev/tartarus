@@ -85,6 +85,16 @@ rules = json.load(sys.stdin)["rules"]
 print("\n".join(", ".join(r["resources"]) for r in rules
   if r["scope"] == "global" and r["resource_type"] == "network" and r["decision"] == "allow"))')"
   [[ -z "$allows" ]] || { echo "  FAIL  global network allows: $allows"; fail=1; }
+  # Approving a blocked-request prompt saves a permanent allow; agents can trigger prompts on purpose.
+  local approved
+  approved="$(sbx policy ls --json --created-via approval | python3 -c '
+import json, sys
+rules = json.load(sys.stdin).get("rules") or []
+print("\n".join(r["scope"] + ": " + ", ".join(r["resources"]) for r in rules if r["decision"] == "allow"))')"
+  [[ -z "$approved" ]] || { echo "  FAIL  allows created by approving prompts:"; printf '          %s\n' "$approved"; fail=1; }
+  local pending
+  pending="$(sbx policy approval ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')"
+  ((pending == 0)) || echo "  info  $pending pending approval prompt(s): dismiss them, don't allow (sbx policy approval ls)"
   local host
   while read -r host; do
     [[ -z "$host" ]] && continue
