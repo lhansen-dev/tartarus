@@ -40,8 +40,10 @@ if env | grep -E '^(VAULT_|AWS_|OP_|GH_TOKEN=|GITHUB_TOKEN=|ANTHROPIC_API_KEY=|O
   | grep -vE 'proxymanaged|proxy-managed'; then bad "host secrets in env"; else pass "no host secrets in env"; fi
 if ssh-add -l >/dev/null 2>&1; then bad "SSH agent reachable"; else pass "no SSH agent"; fi
 # Real credentials stay on the host; the agent's config should only ever hold proxy sentinels.
-if grep -rlsE 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}' \
-  ~/.claude ~/.claude.json ~/.codex ~/.copilot ~/.config 2>/dev/null | grep -v '/projects/'; then
+# JWTs (OAuth), Anthropic/OpenAI keys, GitHub tokens, AWS key IDs, Slack tokens, private keys.
+if grep -rlsE 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|sk-(ant-|proj-)?[A-Za-z0-9_-]{30,}|gh[opsu]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|xox[abpr]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY' \
+  ~/.claude ~/.claude.json ~/.codex ~/.copilot ~/.config ~/.docker ~/.gitconfig ~/.git-credentials ~/.netrc ~/.npmrc \
+  ~/.pypirc ~/.aws ~/.ssh ~/.kube /run/secrets 2>/dev/null | grep -v '/projects/'; then
   bad "real-looking tokens in agent config (files above)"; else pass "agent config holds no real tokens"; fi
 if command -v kubectl >/dev/null && kubectl config current-context >/dev/null 2>&1; then
   bad "kube context set"; else pass "no kube context"; fi
