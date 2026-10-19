@@ -34,6 +34,8 @@ tartarus rm feat1                        # also dismisses its pending approval p
 tartarus dismiss                         # dismiss every pending prompt; never allow one
 ```
 
+A sandbox keeps the config it was created with. Change tartarus, a kit, the policy, or a run's paths, and the next `run` makes a new sandbox; with `--name`, it refuses until you `tartarus rm` the old one.
+
 `tartarus safe <harness>` runs the agent on the host in a scrubbed environment when `sbx` isn't available. It is much weaker isolation.
 
 ## Configure
@@ -48,8 +50,9 @@ tartarus dismiss                         # dismiss every pending prompt; never a
 | Per-harness blocked hosts | `policy/deny-<harness>.txt` | `tartarus sign-kits`, commit |
 | Pinned sbx settings | `SETTINGS` in `bin/tartarus` | `tartarus setup` |
 | CPUs / memory | `TARTARUS_CPUS` (4) / `TARTARUS_MEMORY` (8g) | next `run` |
-| Keep sudo and Docker for the agent | `TARTARUS_ALLOW_ROOT=1` | next `run` |
+| Keep root for the agent: sudo, Docker, writable `~/.local/bin` (`pip install --user`, `npm -g`) | `TARTARUS_ALLOW_ROOT=1` | next `run` |
 | Mount paths holding `.env`, keys and similar untracked files | `TARTARUS_ALLOW_SECRET_FILES=1` | next `run` |
+| Copilot kit version (pinned by digest) | `COPILOT_KIT` in `bin/tartarus` | verify the new digest first (see the comment there) |
 | Alternate kit, deny file, kit sources, signing key | `TARTARUS_BASELINE_KIT`, `TARTARUS_DENY_FILE`, `TARTARUS_KIT_SOURCES`, `TARTARUS_SIGNING_KEY` | |
 
 Kits and policy files are signed: an edited, unsigned or missing one is refused by `sbx`, `setup`, `run` and `audit` until it's re-signed. A changed or deleted `kits/signing.pub` is refused by `setup` until you re-run it with `TARTARUS_REPIN=1`.
@@ -61,5 +64,6 @@ It keeps the agent away from your host, your secrets and prod: no network beyond
 ## Test
 
 ```sh
-bash test/tartarus_test.sh    # uses a stub sbx; no sandboxes are created
+bash test/tartarus_test.sh    # uses a stub sbx; no sandboxes are created. Runs shellcheck if installed
+tartarus verify <sandbox>     # the live check: run it on a real sandbox after changing a kit or policy
 ```
